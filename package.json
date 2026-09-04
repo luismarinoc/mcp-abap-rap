@@ -1,10 +1,9 @@
 {
-  "name": "mcp-abap-abap-adt-api",
-  "version": "0.1.1",
-  "mcpName": "io.github.mario-andreschak/mcp-abap-abap-adt-api",
+  "name": "mcp-abap-rap",
+  "version": "0.2.0",
   "main": "dist/index.js",
   "bin": {
-    "mcp-abap-abap-adt-api": "dist/index.js"
+    "mcp-abap-rap": "dist/index.js"
   },
   "files": [
     "dist"
@@ -27,11 +26,8 @@
     "model-context-protocol"
   ],
   "author": "mario-andreschak",
-  "description": "MCP server wrapping abap-adt-api for full ABAP ADT development workflows (object CRUD, transports, locking, syntax check, activation) against SAP systems",
+  "description": "Fork de mcp-abap-abap-adt-api con soporte para Behavior Definitions, Service Bindings OData V4, paquetes, y tools compuestas para RAP",
   "license": "MIT",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mario-andreschak/mcp-abap-abap-adt-api.git"

@@ -36,6 +36,7 @@ import { AtcHandlers } from './handlers/AtcHandlers.js';
 import { TraceHandlers } from './handlers/TraceHandlers.js';
 import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
+import { RapHandlers } from './handlers/RapHandlers.js';
 
 config({ path: path.resolve(__dirname, '../.env') });
 
@@ -66,6 +67,7 @@ export class AbapAdtServer extends Server {
     private traceHandlers: TraceHandlers;
     private refactorHandlers: RefactorHandlers;
     private revisionHandlers: RevisionHandlers;
+    private rapHandlers: RapHandlers;
 
     constructor() {
     super(
@@ -120,6 +122,7 @@ export class AbapAdtServer extends Server {
     this.traceHandlers = new TraceHandlers(this.adtClient);
     this.refactorHandlers = new RefactorHandlers(this.adtClient);
     this.revisionHandlers = new RevisionHandlers(this.adtClient);
+    this.rapHandlers = new RapHandlers(this.adtClient);
 
 
         // Setup tool handlers
@@ -209,6 +212,7 @@ export class AbapAdtServer extends Server {
             ...this.traceHandlers.getTools(),
             ...this.refactorHandlers.getTools(),
             ...this.revisionHandlers.getTools(),
+            ...this.rapHandlers.getTools(),
             {
             name: 'healthcheck',
             description: 'Check server health and connectivity',
@@ -226,6 +230,14 @@ export class AbapAdtServer extends Server {
         let result: any;
         
         switch (request.params.name) {
+            case 'adtRequest':
+            case 'objectPathFor':
+            case 'createObjectSafe':
+            case 'setSourceByName':
+            case 'createAndActivate':
+            case 'checkObjectRegistered':
+                result = await this.rapHandlers.handle(request.params.name, request.params.arguments);
+                break;
             case 'login':
             case 'logout':
             case 'dropSession':
