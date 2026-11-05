@@ -1,30 +1,37 @@
 /**
- * In-memory cache of ABAP object source, keyed by object source URL.
- *
- * A stdio MCP server serves a single client for the lifetime of the process,
- * so a simple module-level Map is a safe place to remember the source that was
- * last read (getObjectSource) or written (setObjectSource). This lets
- * syntaxCheckCode reuse that source instead of forcing the model to re-send the
- * whole file on every check (issue #2).
+ * In-memory ABAP source cache partitioned by actual ADT connection identity.
+ * Reloading clients creates fresh connections, so old sources cannot leak across reloads.
  */
-const cache = new Map<string, string>();
+import type { ADTClient } from 'abap-adt-api';
+
+let cache = new WeakMap<ADTClient, Map<string, string>>();
+
+function entries(client: ADTClient): Map<string, string> {
+  let entry = cache.get(client);
+  if (!entry) {
+    entry = new Map();
+    cache.set(client, entry);
+  }
+  return entry;
+}
 
 export const sourceCache = {
-  set(url: string, source: string): void {
+  set(url: string, source: string, client: ADTClient): void {
     if (typeof url === 'string' && url.length > 0 && typeof source === 'string') {
-      cache.set(url, source);
+      entries(client).set(url, source);
     }
   },
-  get(url: string): string | undefined {
-    return cache.get(url);
+  get(url: string, client: ADTClient): string | undefined {
+    return entries(client).get(url);
   },
-  has(url: string): boolean {
-    return cache.has(url);
+  has(url: string, client: ADTClient): boolean {
+    return entries(client).has(url);
   },
-  delete(url: string): void {
-    cache.delete(url);
+  delete(url: string, client: ADTClient): void {
+    entries(client).delete(url);
   },
-  clear(): void {
-    cache.clear();
+  clear(client?: ADTClient): void {
+    if (client) cache.delete(client);
+    else cache = new WeakMap();
   }
 };

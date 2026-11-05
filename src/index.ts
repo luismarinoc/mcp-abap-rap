@@ -11,34 +11,35 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { ADTClient, session_types } from "abap-adt-api";
 import path from 'path';
-import { AuthHandlers } from './handlers/AuthHandlers.js';
-import { TransportHandlers } from './handlers/TransportHandlers.js';
-import { ObjectHandlers } from './handlers/ObjectHandlers.js';
-import { ClassHandlers } from './handlers/ClassHandlers.js';
-import { CodeAnalysisHandlers } from './handlers/CodeAnalysisHandlers.js';
-import { ObjectLockHandlers } from './handlers/ObjectLockHandlers.js';
-import { ObjectSourceHandlers } from './handlers/ObjectSourceHandlers.js';
-import { ObjectDeletionHandlers } from './handlers/ObjectDeletionHandlers.js';
-import { ObjectManagementHandlers } from './handlers/ObjectManagementHandlers.js';
-import { ObjectRegistrationHandlers } from './handlers/ObjectRegistrationHandlers.js';
-import { NodeHandlers } from './handlers/NodeHandlers.js';
-import { DiscoveryHandlers } from './handlers/DiscoveryHandlers.js';
-import { UnitTestHandlers } from './handlers/UnitTestHandlers.js';
-import { PrettyPrinterHandlers } from './handlers/PrettyPrinterHandlers.js';
-import { GitHandlers } from './handlers/GitHandlers.js';
-import { DdicHandlers } from './handlers/DdicHandlers.js';
-import { ServiceBindingHandlers } from './handlers/ServiceBindingHandlers.js';
-import { QueryHandlers } from './handlers/QueryHandlers.js';
-import { FeedHandlers } from './handlers/FeedHandlers.js';
-import { DebugHandlers } from './handlers/DebugHandlers.js';
-import { RenameHandlers } from './handlers/RenameHandlers.js';
-import { AtcHandlers } from './handlers/AtcHandlers.js';
-import { TraceHandlers } from './handlers/TraceHandlers.js';
-import { RefactorHandlers } from './handlers/RefactorHandlers.js';
-import { RevisionHandlers } from './handlers/RevisionHandlers.js';
-import { RapHandlers } from './handlers/RapHandlers.js';
-
-config({ path: path.resolve(__dirname, '../.env') });
+import { AuthHandlers } from './handlers/AuthHandlers';
+import { TransportHandlers } from './handlers/TransportHandlers';
+import { ObjectHandlers } from './handlers/ObjectHandlers';
+import { ClassHandlers } from './handlers/ClassHandlers';
+import { CodeAnalysisHandlers } from './handlers/CodeAnalysisHandlers';
+import { ObjectLockHandlers } from './handlers/ObjectLockHandlers';
+import { ObjectSourceHandlers } from './handlers/ObjectSourceHandlers';
+import { ObjectDeletionHandlers } from './handlers/ObjectDeletionHandlers';
+import { ObjectManagementHandlers } from './handlers/ObjectManagementHandlers';
+import { ObjectRegistrationHandlers } from './handlers/ObjectRegistrationHandlers';
+import { NodeHandlers } from './handlers/NodeHandlers';
+import { DiscoveryHandlers } from './handlers/DiscoveryHandlers';
+import { UnitTestHandlers } from './handlers/UnitTestHandlers';
+import { PrettyPrinterHandlers } from './handlers/PrettyPrinterHandlers';
+import { GitHandlers } from './handlers/GitHandlers';
+import { DdicHandlers } from './handlers/DdicHandlers';
+import { ServiceBindingHandlers } from './handlers/ServiceBindingHandlers';
+import { QueryHandlers } from './handlers/QueryHandlers';
+import { FeedHandlers } from './handlers/FeedHandlers';
+import { DebugHandlers } from './handlers/DebugHandlers';
+import { RenameHandlers } from './handlers/RenameHandlers';
+import { AtcHandlers } from './handlers/AtcHandlers';
+import { TraceHandlers } from './handlers/TraceHandlers';
+import { RefactorHandlers } from './handlers/RefactorHandlers';
+import { RevisionHandlers } from './handlers/RevisionHandlers';
+import { RapHandlers } from './handlers/RapHandlers';
+import { ClientHandlers } from './handlers/ClientHandlers';
+import { RegistroClientes } from './clients';
+import { connectionDiagnostic } from './lib/connectionDiagnostics';
 
 export class AbapAdtServer extends Server {
   private adtClient: ADTClient;
@@ -68,6 +69,8 @@ export class AbapAdtServer extends Server {
     private refactorHandlers: RefactorHandlers;
     private revisionHandlers: RevisionHandlers;
     private rapHandlers: RapHandlers;
+    private clientHandlers: ClientHandlers;
+    private registro: RegistroClientes;
 
     constructor() {
     super(
@@ -82,19 +85,9 @@ export class AbapAdtServer extends Server {
       }
     );
 
-    const missingVars = ['SAP_URL', 'SAP_USER', 'SAP_PASSWORD'].filter(v => !process.env[v]);
-    if (missingVars.length > 0) {
-      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
-    }
-    
-    this.adtClient = new ADTClient(
-      process.env.SAP_URL as string,
-      process.env.SAP_USER as string,
-      process.env.SAP_PASSWORD as string,
-      process.env.SAP_CLIENT as string,
-      process.env.SAP_LANGUAGE as string
-    );
-    this.adtClient.stateful = session_types.stateful
+    // Registro de clientes: clientes.json, o variables de entorno como respaldo.
+    this.registro = new RegistroClientes();
+    this.adtClient = this.registro.cliente;
     
     // Initialize handlers
     this.authHandlers = new AuthHandlers(this.adtClient);
@@ -123,6 +116,7 @@ export class AbapAdtServer extends Server {
     this.refactorHandlers = new RefactorHandlers(this.adtClient);
     this.revisionHandlers = new RevisionHandlers(this.adtClient);
     this.rapHandlers = new RapHandlers(this.adtClient);
+    this.clientHandlers = new ClientHandlers(this.adtClient, this.registro);
 
 
         // Setup tool handlers
@@ -164,7 +158,9 @@ export class AbapAdtServer extends Server {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            error: error.message,
+            error: error.code === ErrorCode.InternalError
+              ? 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.'
+              : error.message,
             code: error.code
           })
         }],
@@ -175,8 +171,9 @@ export class AbapAdtServer extends Server {
       content: [{
         type: 'text',
         text: JSON.stringify({
-          error: 'Internal server error',
-          code: ErrorCode.InternalError
+          error: 'Connection or server error; operation outcome may be unknown. Inspect SAP before retrying a write; recover with dropSession/login explicitly.',
+          code: ErrorCode.InternalError,
+          diagnostic: connectionDiagnostic(error)
         })
       }],
       isError: true
@@ -213,12 +210,13 @@ export class AbapAdtServer extends Server {
             ...this.refactorHandlers.getTools(),
             ...this.revisionHandlers.getTools(),
             ...this.rapHandlers.getTools(),
+            ...this.clientHandlers.getTools(),
             {
             name: 'healthcheck',
-            description: 'Check server health and connectivity',
+            description: 'Check local server health (default). Set probeSap to perform one authenticated read-only GET using an independent stateless session; it does not prove the editing session or locks are valid.',
             inputSchema: {
               type: 'object',
-              properties: {}
+              properties: { probeSap: { type: 'boolean', description: 'Opt in to independent SAP GET probe (5 second response deadline including authentication; underlying request is not cancelled).' } }
             }
           }
         ]
@@ -226,10 +224,17 @@ export class AbapAdtServer extends Server {
     });
 
     this.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const dispatch = async () => {
       try {
         let result: any;
         
         switch (request.params.name) {
+            case 'listarClientes':
+            case 'usarCliente':
+            case 'clienteActual':
+            case 'recargarClientes':
+                result = await this.clientHandlers.handle(request.params.name, request.params.arguments);
+                break;
             case 'adtRequest':
             case 'objectPathFor':
             case 'createObjectSafe':
@@ -416,6 +421,33 @@ export class AbapAdtServer extends Server {
                 break;
             case 'healthcheck':
                 result = { status: 'healthy', timestamp: new Date().toISOString() };
+                if (request.params.arguments?.probeSap === true) {
+                  // AdtHTTP.request may log in before applying its per-GET timeout.
+                  // Bound the entire probe response without changing the editing session.
+                  const expired = Symbol('probe deadline');
+                  let timer: ReturnType<typeof setTimeout> | undefined;
+                  const deadline = new Promise<never>((_, reject) => {
+                    timer = setTimeout(() => reject(expired), 5000);
+                  });
+                  try {
+                    // Promise.race observes late GET/login rejections; it cannot cancel them.
+                    await Promise.race([
+                      Promise.resolve().then(() => {
+                        const probe = this.registro.connectionActual.statelessClone;
+                        return probe.httpClient.request('/sap/bc/adt/discovery', { method: 'GET', timeout: 5000 });
+                      }),
+                      deadline
+                    ]);
+                    result.sap = { status: 'reachable', session: 'independent stateless session' };
+                  } catch (error) {
+                    result.sap = {
+                      status: 'unreachable', session: 'independent stateless session',
+                      diagnostic: error === expired ? { category: 'timeout' } : connectionDiagnostic(error)
+                    };
+                  } finally {
+                    if (timer) clearTimeout(timer);
+                  }
+                }
                 break;
             default:
                 throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
@@ -425,6 +457,10 @@ export class AbapAdtServer extends Server {
       } catch (error) {
         return this.handleError(error);
       }
+      };
+      // Local health must remain network- and configuration-independent.
+      if (request.params.name === 'healthcheck' && request.params.arguments?.probeSap !== true) return dispatch();
+      return this.registro.withPinnedConnection(dispatch);
     });
   }
 
@@ -451,9 +487,12 @@ export class AbapAdtServer extends Server {
   }
 }
 
-// Create and run server instance
-const server = new AbapAdtServer();
-server.run().catch((error) => {
-  console.error('Failed to start MCP server:', error);
-  process.exit(1);
-});
+// Importing the server for offline tests must not start stdio or read private configuration.
+if (require.main === module) {
+  config({ path: path.resolve(__dirname, '../.env') });
+  const server = new AbapAdtServer();
+  server.run().catch((error) => {
+    console.error('Failed to start MCP server:', error);
+    process.exit(1);
+  });
+}

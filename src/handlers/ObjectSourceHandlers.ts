@@ -3,6 +3,7 @@ import { BaseHandler } from './BaseHandler';
 import type { ToolDefinition } from '../types/tools';
 import { session_types } from "abap-adt-api";
 import { sourceCache } from '../lib/sourceCache';
+import { connectionFor } from '../clients';
 
 export class ObjectSourceHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
@@ -31,7 +32,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       },
       {
         name: 'setObjectSource',
-        description: 'Sets source code for ABAP objects',
+        description: 'Sets source code for ABAP objects. If the session fails, the write outcome is unknown: inspect SAP before retrying. Use dropSession/login explicitly for recovery; locks are not replaced automatically.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -64,7 +65,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       const fullSource = await this.adtclient.getObjectSource(args.objectSourceUrl, args.options);
       // Remember the source so a later syntaxCheckCode on the same URL can reuse
       // it without the caller re-sending it (issue #2).
-      sourceCache.set(args.objectSourceUrl, fullSource);
+      sourceCache.set(args.objectSourceUrl, fullSource, connectionFor(this.adtclient));
       this.trackRequest(startTime, true);
 
       const lines = fullSource.split('\n');
@@ -100,7 +101,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       this.trackRequest(startTime, false);
       throw new McpError(
         ErrorCode.InternalError,
-        `Failed to get object source: ${error.message || 'Unknown error'}`
+        'Failed to get object source; check session and use dropSession/login explicitly if needed.'
       );
     }
   }
@@ -118,7 +119,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       );
       // Cache the just-written source so a follow-up syntaxCheckCode can reuse it
       // without the caller re-sending it (issue #2).
-      sourceCache.set(args.objectSourceUrl, args.source);
+      sourceCache.set(args.objectSourceUrl, args.source, connectionFor(this.adtclient));
       this.trackRequest(startTime, true);
       return {
         content: [
@@ -135,7 +136,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       this.trackRequest(startTime, false);
       throw new McpError(
         ErrorCode.InternalError,
-        `Failed to set object source: ${error.message || 'Unknown error'}`
+        'Failed to set object source; outcome unknown. Inspect SAP before retrying; use dropSession/login explicitly if needed.'
       );
     }
   }

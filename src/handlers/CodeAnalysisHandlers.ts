@@ -3,13 +3,14 @@ import { BaseHandler } from './BaseHandler.js';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from 'abap-adt-api';
 import { sourceCache } from '../lib/sourceCache.js';
+import { connectionFor } from '../clients';
 
 export class CodeAnalysisHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
         return [
             {
                 name: 'syntaxCheckCode',
-                description: 'Perform ABAP syntax check. Provide the source in "code", or omit it to reuse the source last read/written for "url" via getObjectSource/setObjectSource (cached this session).',
+                description: 'Perform ABAP syntax check. Provide the source in "code", or omit it to reuse the source last read/written for "url" via getObjectSource/setObjectSource (cached for the current SAP connection only).',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -262,11 +263,11 @@ export class CodeAnalysisHandlers extends BaseHandler {
         let code = args?.code;
         let usedCachedSource = false;
         if (code === undefined || code === null || code === '') {
-            const cached = sourceCache.get(args.url);
+            const cached = sourceCache.get(args.url, connectionFor(this.adtclient));
             if (cached === undefined) {
                 throw new McpError(
                     ErrorCode.InvalidParams,
-                    `No source provided and none cached for '${args.url}'. Pass "code", or call getObjectSource/setObjectSource for this URL first.`
+                    `No source provided and none cached for '${args.url}' on this SAP connection. Pass "code", or call getObjectSource/setObjectSource for this URL first.`
                 );
             }
             code = cached;

@@ -7,7 +7,7 @@ export class AuthHandlers extends BaseHandler {
     return [
       {
         name: 'login',
-        description: 'Authenticate with ABAP system',
+        description: 'Explicitly authenticate with the selected ABAP system after inspecting any uncertain write outcome. Does not restore lost locks.',
         inputSchema: {
           type: 'object',
           properties: {}
@@ -15,7 +15,7 @@ export class AuthHandlers extends BaseHandler {
       },
       {
         name: 'logout',
-        description: 'Terminate ABAP session',
+        description: 'Explicitly terminate the selected ABAP session; existing locks may no longer be usable.',
         inputSchema: {
           type: 'object',
           properties: {}
@@ -23,7 +23,7 @@ export class AuthHandlers extends BaseHandler {
       },
       {
         name: 'dropSession',
-        description: 'Clear local session cache',
+        description: 'Explicitly clear the selected ABAP session cache after inspecting SAP for uncertain write outcomes. Re-login and reacquire locks deliberately; no write is replayed.',
         inputSchema: {
           type: 'object',
           properties: {}
