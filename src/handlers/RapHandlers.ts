@@ -96,7 +96,7 @@ export class RapHandlers extends BaseHandler {
       },
       {
         name: 'setSourceByName',
-        description: 'Write source by object name and type. Resolves the URL, locks, writes and unlocks in one call.',
+        description: 'Write source by object name and type. Resolves the URL, locks, writes and unlocks in one call. Reports unlock failures; a failed write remains the primary failure if cleanup also fails.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -111,7 +111,7 @@ export class RapHandlers extends BaseHandler {
       },
       {
         name: 'createAndActivate',
-        description: 'Full pipeline: create, write source, activate. Replaces the create/lock/setSource/unLock/activate sequence.',
+        description: 'Full pipeline: create, write source, activate. Replaces the create/lock/setSource/unLock/activate sequence. An unsuccessful activation returns isError with failure status and diagnostic messages; no mutation is retried.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -121,6 +121,8 @@ export class RapHandlers extends BaseHandler {
             description: { type: 'string' },
             source: { type: 'string', optional: true },
             transport: { type: 'string', optional: true },
+            language: { type: 'string', description: 'ADT object language, e.g. ES', optional: true },
+            masterLanguage: { type: 'string', description: 'ADT master language, e.g. ES', optional: true },
             implementationType: { type: 'string', optional: true },
             rootEntity: { type: 'string', optional: true },
             service: { type: 'string', optional: true },
@@ -156,15 +158,21 @@ export class RapHandlers extends BaseHandler {
       case 'objectPathFor':         return this.ok(this.resolve(args.objtype, args.name, args.part));
       case 'createObjectSafe':      return this.ok(await this.createSafe(args));
       case 'setSourceByName':       return this.ok(await this.setSource(args));
-      case 'createAndActivate':     return this.ok(await this.createAndActivate(args));
+      case 'createAndActivate': {
+        const result = await this.createAndActivate(args);
+        return this.ok(result, !result.activated);
+      }
       case 'checkObjectRegistered': return this.ok(await this.checkRegistered(args.objtype, args.name));
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown RAP tool: ${toolName}`);
     }
   }
 
-  private ok(payload: any) {
-    return { content: [{ type: 'text', text: JSON.stringify({ status: 'success', ...payload }) }] };
+  private ok(payload: any, isError = false) {
+    return {
+      ...(isError ? { isError: true } : {}),
+      content: [{ type: 'text', text: JSON.stringify({ status: isError ? 'failure' : 'success', ...payload }) }]
+    };
   }
 
   private fail(msg: string): never {
@@ -301,7 +309,9 @@ ${a.transportLayer ? `<pak:transportLayer pak:name="${esc(a.transportLayer)}"/>`
       await (this.adtclient as any).createObject({
         objtype: a.objtype, name: a.name, parentName: a.parentName,
         description: a.description, parentPath: a.parentPath || `/sap/bc/adt/packages/${a.parentName.toLowerCase()}`,
-        responsible: a.responsible || '', transport: a.transport || ''
+        responsible: a.responsible || '', transport: a.transport || '',
+        language: a.language || process.env.SAP_LANGUAGE || 'EN',
+        masterLanguage: a.masterLanguage || a.language || process.env.SAP_LANGUAGE || 'EN'
       });
     }
 
@@ -321,11 +331,23 @@ ${a.transportLayer ? `<pak:transportLayer pak:name="${esc(a.transportLayer)}"/>`
     if (!sourceUrl) this.fail(`${a.objtype} has no editable source`);
     const lock = await (this.adtclient as any).lock(objectUrl, 'MODIFY');
     const handle = lock?.LOCK_HANDLE || lock?.lockHandle || lock;
+    let writeError: unknown;
+    let unlockError: unknown;
     try {
       await (this.adtclient as any).setObjectSource(sourceUrl, a.source, handle, a.transport);
+    } catch (error) {
+      writeError = error;
     } finally {
-      try { await (this.adtclient as any).unLock(objectUrl, handle); } catch { /* ya liberado */ }
+      try {
+        await (this.adtclient as any).unLock(objectUrl, handle);
+      } catch (error) {
+        unlockError = error;
+      }
     }
+    // Do not echo ADT exception text: it can contain connection or request details.
+    if (writeError && unlockError) this.fail('Source write failed; unlock also failed. Check the object lock before retrying.');
+    if (writeError) throw writeError;
+    if (unlockError) this.fail('Source unlock failed after write. Check the object lock before retrying.');
     return { written: sourceUrl, bytes: a.source.length };
   }
 
