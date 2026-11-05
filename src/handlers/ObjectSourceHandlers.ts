@@ -4,13 +4,14 @@ import type { ToolDefinition } from '../types/tools';
 import { session_types } from "abap-adt-api";
 import { sourceCache } from '../lib/sourceCache';
 import { connectionFor } from '../clients';
+import { connectionError } from '../lib/connectionDiagnostics';
 
 export class ObjectSourceHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
     return [
       {
         name: 'getObjectSource',
-        description: 'Retrieves source code for ABAP objects. For large objects, use startLine/maxLines to page through the source instead of retrieving it all at once.',
+        description: 'Retrieves source code for ABAP objects. For large objects, use startLine/maxLines to page through the source instead of retrieving it all at once. Connection failures return safe diagnostic categories; use dropSession/login explicitly if needed.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -99,10 +100,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        'Failed to get object source; check session and use dropSession/login explicitly if needed.'
-      );
+      throw connectionError(error, 'Failed to get object source; check session and use dropSession/login explicitly if needed.');
     }
   }
 
@@ -134,10 +132,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        'Failed to set object source; outcome unknown. Inspect SAP before retrying; use dropSession/login explicitly if needed.'
-      );
+      throw connectionError(error, 'Failed to set object source; outcome unknown. Inspect SAP before retrying; use dropSession/login explicitly if needed.');
     }
   }
 }

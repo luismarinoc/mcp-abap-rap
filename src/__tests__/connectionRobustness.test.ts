@@ -12,7 +12,9 @@ jest.mock('abap-adt-api', () => ({
       getObjectSource: jest.fn(async () => url + ':source'),
       syntaxCheck: jest.fn(async (_url: string, _main: any, code: string) => code),
       setObjectSource: jest.fn(async () => undefined),
-      login: jest.fn(async () => ({})), dropSession: jest.fn(async () => undefined),
+      login: jest.fn(async () => ({})), logout: jest.fn(async () => undefined),
+      dropSession: jest.fn(async () => undefined),
+      lock: jest.fn(async () => ({ LOCK_HANDLE: 'handle' })), unLock: jest.fn(async () => undefined),
       get statelessClone() { return { httpClient: { request: probeRequest } }; }
     };
     instances.push(client);
@@ -92,6 +94,64 @@ test('connection errors are sanitized and uncertain writes are not replayed', as
   expect(client.setObjectSource).toHaveBeenCalledTimes(1);
   expect(client.login).not.toHaveBeenCalled();
   expect(client.dropSession).not.toHaveBeenCalled();
+});
+
+test('read 401 is classified without leaking ADT data and a later read succeeds', async () => {
+  const first = body(await call('getObjectSource', { objectSourceUrl: '/first' }));
+  expect(first.status).toBe('success');
+  const client = instances[0];
+  client.getObjectSource.mockRejectedValueOnce(Object.assign(new Error('token=SECRET'), { response: { status: 401, data: 'SECRET' }, code: 'SECRET', config: { password: 'SECRET' } }));
+  const failed = await call('getObjectSource', { objectSourceUrl: '/first' });
+  expect(failed.isError).toBe(true);
+  expect(body(failed)).toEqual({ error: 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.', code: -32603, diagnostic: { category: 'authentication', status: 401 } });
+  expect(JSON.stringify(failed)).not.toContain('SECRET');
+  expect(body(await call('getObjectSource', { objectSourceUrl: '/second' })).source).toBe('system-A:source');
+  expect(client.getObjectSource).toHaveBeenCalledTimes(3);
+});
+
+test('failed write is classified, never replayed, and recovery is explicit', async () => {
+  await call('getObjectSource', { objectSourceUrl: '/initialize' });
+  const client = instances[0];
+  client.setObjectSource.mockRejectedValueOnce(Object.assign(new Error('SECRET'), { status: 401, config: { token: 'SECRET' } }));
+  const failed = await call('setObjectSource', { objectSourceUrl: '/object', source: 'new', lockHandle: 'handle' });
+  expect(failed.isError).toBe(true);
+  expect(body(failed)).toEqual({ error: 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.', code: -32603, diagnostic: { category: 'authentication', status: 401 } });
+  expect(JSON.stringify(failed)).not.toContain('SECRET');
+  expect(client.setObjectSource).toHaveBeenCalledTimes(1);
+  expect(client.login).not.toHaveBeenCalled();
+  expect(client.dropSession).not.toHaveBeenCalled();
+  expect(body(await call('dropSession'))).toEqual({ status: 'Session cleared' });
+  expect(body(await call('login'))).toEqual({});
+  expect(body(await call('getObjectSource', { objectSourceUrl: '/after' })).source).toBe('system-A:source');
+  expect(client.setObjectSource).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  ['lock', { objectUrl: '/object' }, 'lock', { status: 403 }, { category: 'authentication', status: 403 }],
+  ['unLock', { objectUrl: '/object', lockHandle: 'handle' }, 'unLock', { code: 'ECONNRESET' }, { category: 'network', code: 'ECONNRESET' }],
+  ['login', {}, 'login', { status: 401 }, { category: 'authentication', status: 401 }],
+  ['logout', {}, 'logout', { status: 503 }, { category: 'sap_http', status: 503 }],
+  ['dropSession', {}, 'dropSession', { code: 'ETIMEDOUT' }, { category: 'network', code: 'ETIMEDOUT' }]
+] as const)('%s errors retain safe diagnostic and a later call can succeed', async (tool, args, method, metadata, diagnostic) => {
+  await call('getObjectSource', { objectSourceUrl: '/initialize' });
+  const client = instances[0];
+  client[method].mockRejectedValueOnce(Object.assign(new Error('SECRET'), metadata, { config: { token: 'SECRET' } }));
+  const failed = await call(tool, args);
+  expect(failed.isError).toBe(true);
+  expect(body(failed)).toEqual({ error: 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.', code: -32603, diagnostic });
+  expect(JSON.stringify(failed)).not.toContain('SECRET');
+  const success = await call(tool, args);
+  expect(success.isError).not.toBe(true);
+  expect(body(success)).toEqual(tool === 'lock' ? { status: 'success', lockHandle: 'handle', message: 'Object locked successfully' }
+    : tool === 'unLock' ? { status: 'success', message: 'Object unlocked successfully' }
+    : tool === 'login' ? {} : tool === 'logout' ? { status: 'Logged out successfully' } : { status: 'Session cleared' });
+  expect(client[method]).toHaveBeenCalledTimes(2);
+});
+
+test('generic MCP errors retain their existing payload without arbitrary data', async () => {
+  const failed = await call('nonexistentTool');
+  expect(failed.isError).toBe(true);
+  expect(body(failed)).toEqual({ error: 'MCP error -32601: Unknown tool: nonexistentTool', code: -32601 });
 });
 
 test('switching while a request is pending retains its pinned client and isolates source cache', async () => {

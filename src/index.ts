@@ -39,7 +39,7 @@ import { RevisionHandlers } from './handlers/RevisionHandlers';
 import { RapHandlers } from './handlers/RapHandlers';
 import { ClientHandlers } from './handlers/ClientHandlers';
 import { RegistroClientes } from './clients';
-import { connectionDiagnostic } from './lib/connectionDiagnostics';
+import { connectionDiagnostic, wrappedConnectionDiagnostic } from './lib/connectionDiagnostics';
 
 export class AbapAdtServer extends Server {
   private adtClient: ADTClient;
@@ -161,7 +161,8 @@ export class AbapAdtServer extends Server {
             error: error.code === ErrorCode.InternalError
               ? 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.'
               : error.message,
-            code: error.code
+            code: error.code,
+            ...(wrappedConnectionDiagnostic(error) ? { diagnostic: wrappedConnectionDiagnostic(error) } : {})
           })
         }],
         isError: true

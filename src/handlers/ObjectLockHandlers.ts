@@ -2,12 +2,13 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
+import { connectionError } from '../lib/connectionDiagnostics';
 
 export class ObjectLockHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
     return [{
       name: 'lock',
-      description: 'Lock an object',
+      description: 'Lock an object. Connection failures return safe diagnostics; inspect SAP before retrying and recover explicitly with dropSession/login.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -25,7 +26,7 @@ export class ObjectLockHandlers extends BaseHandler {
       }
     }, {
       name: 'unLock',
-      description: 'Unlock an object',
+      description: 'Unlock an object. Connection failures return safe diagnostics; inspect SAP before retrying and recover explicitly with dropSession/login.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -74,10 +75,7 @@ export class ObjectLockHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to lock object: ${error.message || 'Unknown error'}`
-      );
+      throw connectionError(error, 'Failed to lock object');
     }
   }
 
@@ -101,10 +99,7 @@ export class ObjectLockHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to unlock object: ${error.message || 'Unknown error'}`
-      );
+      throw connectionError(error, 'Failed to unlock object');
     }
   }
 }
