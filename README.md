@@ -1,5 +1,7 @@
 DISCLAIMER: This server is still in experimental status! Use it with caution!
 
+Local development: see [backup and recovery](docs/backup-and-recovery.md), [connection diagnostics](docs/connection-robustness.md), and [RAP operation results](docs/rap-results.md). The improvements on `feat/connection-robustness` are not automatically installed into `dist/`. Offline protocol tests pass, but the independent real-ADT stalled-login recheck remains unverified; the reported disconnect is not confirmed fixed.
+
 # ABAP-ADT-API MCP-Server
 
 ## Description
