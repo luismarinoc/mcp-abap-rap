@@ -158,7 +158,9 @@ export class AbapAdtServer extends Server {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            error: error.code === ErrorCode.InternalError
+            error: wrappedConnectionDiagnostic(error)?.category === 'recovery_required'
+              ? 'SAP session recovery required; write outcome may be unknown. Inspect SAP before retrying a write; login explicitly and reacquire locks.'
+              : error.code === ErrorCode.InternalError
               ? 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.'
               : error.message,
             code: error.code,
@@ -172,7 +174,9 @@ export class AbapAdtServer extends Server {
       content: [{
         type: 'text',
         text: JSON.stringify({
-          error: 'Connection or server error; operation outcome may be unknown. Inspect SAP before retrying a write; recover with dropSession/login explicitly.',
+          error: connectionDiagnostic(error).category === 'recovery_required'
+            ? 'SAP session recovery required; write outcome may be unknown. Inspect SAP before retrying a write; login explicitly and reacquire locks.'
+            : 'Connection or server error; operation outcome may be unknown. Inspect SAP before retrying a write; recover with dropSession/login explicitly.',
           code: ErrorCode.InternalError,
           diagnostic: connectionDiagnostic(error)
         })

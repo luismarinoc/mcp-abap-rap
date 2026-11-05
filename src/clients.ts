@@ -2,6 +2,7 @@ import { ADTClient, session_types } from 'abap-adt-api';
 import fs from 'fs';
 import path from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
+import { loginSucceeded, observeFailure, recoveryError, recoveryRequired, recoveryVersion, requestTimeout } from './lib/sessionRecovery';
 
 const proxies = new WeakMap<ADTClient, RegistroClientes>();
 
@@ -35,6 +36,7 @@ export class RegistroClientes {
   private conexiones = new Map<string, ADTClient>();
   private activo = '';
   private readonly requestConnection = new AsyncLocalStorage<ADTClient>();
+  private readonly timeout: number;
 
   /** Snapshot the selected client at the start of a tool request; no global lock. */
   withPinnedConnection<T>(operation: () => Promise<T>): Promise<T> {
@@ -46,6 +48,7 @@ export class RegistroClientes {
   }
 
   constructor() {
+    this.timeout = requestTimeout(process.env.SAP_REQUEST_TIMEOUT_MS);
     this.cargar();
   }
 
@@ -123,11 +126,37 @@ export class RegistroClientes {
     let cli = this.conexiones.get(this.activo);
     if (!cli) {
       const c = this.def.clientes[this.activo];
-      cli = new ADTClient(c.url, c.usuario, c.password, c.mandante as string, c.idioma as string);
+      cli = new ADTClient(c.url, c.usuario, c.password, c.mandante as string, c.idioma as string, { timeout: this.timeout });
       (cli as any).stateful = session_types.stateful;
       this.conexiones.set(this.activo, cli);
     }
     return cli;
+  }
+
+  private observedCall(real: ADTClient, method: (...args: any[]) => any, name: string | symbol) {
+    return (...args: any[]) => {
+      if (name !== 'login' && name !== 'logout' && name !== 'dropSession' && recoveryRequired(real)) {
+        throw recoveryError();
+      }
+      const version = recoveryVersion(real);
+      try {
+        const result = method(...args);
+        if (result && typeof result.then === 'function') {
+          return Promise.resolve(result).then(value => {
+            if (name === 'login') loginSucceeded(real, version);
+            return value;
+          }, error => {
+            observeFailure(real, error, version);
+            throw error;
+          });
+        }
+        if (name === 'login') loginSucceeded(real, version);
+        return result;
+      } catch (error) {
+        observeFailure(real, error, version);
+        throw error;
+      }
+    };
   }
 
   /**
@@ -139,8 +168,18 @@ export class RegistroClientes {
     const proxy = new Proxy({} as ADTClient, {
       get(_t, prop) {
         const real: any = self.connectionActual;
+        if (prop === 'httpClient') {
+          const http = real.httpClient;
+          return new Proxy(http, {
+            get(target, key) {
+              const value = (target as any)[key];
+              return key === 'request' ? self.observedCall(real, value.bind(target), 'request')
+                : typeof value === 'function' ? value.bind(target) : value;
+            }
+          });
+        }
         const val = real[prop];
-        return typeof val === 'function' ? val.bind(real) : val;
+        return typeof val === 'function' ? self.observedCall(real, val.bind(real), prop) : val;
       },
       set(_t, prop, val) {
         (self.connectionActual as any)[prop as any] = val;

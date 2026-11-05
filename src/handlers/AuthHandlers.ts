@@ -8,7 +8,7 @@ export class AuthHandlers extends BaseHandler {
     return [
       {
         name: 'login',
-        description: 'Explicitly authenticate with the selected ABAP system after inspecting any uncertain write outcome. Does not restore lost locks. Failures return safe connection diagnostics.',
+        description: 'Explicitly authenticate the selected ABAP session to clear recovery-required state after inspecting uncertain write outcomes. Reacquire locks deliberately; login does not restore lost locks. Failures retain recovery-required state.',
         inputSchema: {
           type: 'object',
           properties: {}
@@ -24,7 +24,7 @@ export class AuthHandlers extends BaseHandler {
       },
       {
         name: 'dropSession',
-        description: 'Explicitly clear the selected ABAP session cache after inspecting SAP for uncertain write outcomes. Re-login and reacquire locks deliberately; no write is replayed. Failures return safe connection diagnostics.',
+        description: 'Explicitly drop the selected ABAP session after inspecting uncertain write outcomes. Drop alone does not clear recovery-required state or cached cookies/CSRF: login explicitly and reacquire locks; no write is replayed.',
         inputSchema: {
           type: 'object',
           properties: {}

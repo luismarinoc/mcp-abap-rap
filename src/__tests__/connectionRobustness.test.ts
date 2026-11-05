@@ -87,24 +87,27 @@ test('connection errors are sanitized and uncertain writes are not replayed', as
   const result = await call('getObjectSource', { objectSourceUrl: '/same' });
   expect(result.isError).toBe(true);
   expect(JSON.stringify(result)).not.toContain('SECRET');
-  client.setObjectSource.mockRejectedValueOnce(Object.assign(new Error('session lost SECRET'), { status: 401 }));
   const write = await call('setObjectSource', { objectSourceUrl: '/same', source: 'x', lockHandle: 'lock' });
   expect(write.isError).toBe(true);
   expect(JSON.stringify(write)).not.toContain('SECRET');
-  expect(client.setObjectSource).toHaveBeenCalledTimes(1);
+  expect(body(write).diagnostic).toEqual({ category: 'recovery_required' });
+  expect(client.setObjectSource).not.toHaveBeenCalled();
   expect(client.login).not.toHaveBeenCalled();
   expect(client.dropSession).not.toHaveBeenCalled();
 });
 
-test('read 401 is classified without leaking ADT data and a later read succeeds', async () => {
+test('read 401 requires explicit login before a later read succeeds', async () => {
   const first = body(await call('getObjectSource', { objectSourceUrl: '/first' }));
   expect(first.status).toBe('success');
   const client = instances[0];
   client.getObjectSource.mockRejectedValueOnce(Object.assign(new Error('token=SECRET'), { response: { status: 401, data: 'SECRET' }, code: 'SECRET', config: { password: 'SECRET' } }));
   const failed = await call('getObjectSource', { objectSourceUrl: '/first' });
   expect(failed.isError).toBe(true);
-  expect(body(failed)).toEqual({ error: 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.', code: -32603, diagnostic: { category: 'authentication', status: 401 } });
+  expect(body(failed)).toEqual({ error: 'SAP session recovery required; write outcome may be unknown. Inspect SAP before retrying a write; login explicitly and reacquire locks.', code: -32603, diagnostic: { category: 'recovery_required', status: 401 } });
   expect(JSON.stringify(failed)).not.toContain('SECRET');
+  expect(body(await call('getObjectSource', { objectSourceUrl: '/second' })).diagnostic).toEqual({ category: 'recovery_required' });
+  expect(client.getObjectSource).toHaveBeenCalledTimes(2);
+  await call('login');
   expect(body(await call('getObjectSource', { objectSourceUrl: '/second' })).source).toBe('system-A:source');
   expect(client.getObjectSource).toHaveBeenCalledTimes(3);
 });
@@ -115,19 +118,20 @@ test('failed write is classified, never replayed, and recovery is explicit', asy
   client.setObjectSource.mockRejectedValueOnce(Object.assign(new Error('SECRET'), { status: 401, config: { token: 'SECRET' } }));
   const failed = await call('setObjectSource', { objectSourceUrl: '/object', source: 'new', lockHandle: 'handle' });
   expect(failed.isError).toBe(true);
-  expect(body(failed)).toEqual({ error: 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.', code: -32603, diagnostic: { category: 'authentication', status: 401 } });
+  expect(body(failed)).toEqual({ error: 'SAP session recovery required; write outcome may be unknown. Inspect SAP before retrying a write; login explicitly and reacquire locks.', code: -32603, diagnostic: { category: 'recovery_required', status: 401 } });
   expect(JSON.stringify(failed)).not.toContain('SECRET');
   expect(client.setObjectSource).toHaveBeenCalledTimes(1);
   expect(client.login).not.toHaveBeenCalled();
   expect(client.dropSession).not.toHaveBeenCalled();
   expect(body(await call('dropSession'))).toEqual({ status: 'Session cleared' });
+  expect(body(await call('getObjectSource', { objectSourceUrl: '/after' })).diagnostic).toEqual({ category: 'recovery_required' });
   expect(body(await call('login'))).toEqual({});
   expect(body(await call('getObjectSource', { objectSourceUrl: '/after' })).source).toBe('system-A:source');
   expect(client.setObjectSource).toHaveBeenCalledTimes(1);
 });
 
 test.each([
-  ['lock', { objectUrl: '/object' }, 'lock', { status: 403 }, { category: 'authentication', status: 403 }],
+  ['lock', { objectUrl: '/object' }, 'lock', { status: 403 }, { category: 'authorization', status: 403 }],
   ['unLock', { objectUrl: '/object', lockHandle: 'handle' }, 'unLock', { code: 'ECONNRESET' }, { category: 'network', code: 'ECONNRESET' }],
   ['login', {}, 'login', { status: 401 }, { category: 'authentication', status: 401 }],
   ['logout', {}, 'logout', { status: 503 }, { category: 'sap_http', status: 503 }],
@@ -138,7 +142,7 @@ test.each([
   client[method].mockRejectedValueOnce(Object.assign(new Error('SECRET'), metadata, { config: { token: 'SECRET' } }));
   const failed = await call(tool, args);
   expect(failed.isError).toBe(true);
-  expect(body(failed)).toEqual({ error: 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.', code: -32603, diagnostic });
+  expect(body(failed)).toEqual({ error: tool === 'login' ? 'SAP session recovery required; write outcome may be unknown. Inspect SAP before retrying a write; login explicitly and reacquire locks.' : 'SAP operation failed; outcome may be unknown. Inspect SAP before retrying a write; use dropSession/login explicitly for recovery.', code: -32603, diagnostic: tool === 'login' ? { category: 'recovery_required', status: 401 } : diagnostic });
   expect(JSON.stringify(failed)).not.toContain('SECRET');
   const success = await call(tool, args);
   expect(success.isError).not.toBe(true);

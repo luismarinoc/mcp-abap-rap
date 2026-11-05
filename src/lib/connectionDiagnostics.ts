@@ -1,4 +1,5 @@
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { isRecoveryError, numericHttpStatus } from './sessionRecovery';
 
 // Only errors created by the selected core handlers carry a diagnostic into dispatch.
 // Keep it outside McpError.data: arbitrary SDK errors may have untrusted data.
@@ -18,15 +19,13 @@ export function wrappedConnectionDiagnostic(error: McpError) {
 // These may contain credentials, cookies, source code or auth challenges.
 export function connectionDiagnostic(error: unknown) {
   const e = error && typeof error === 'object' ? error as Record<string, unknown> : {};
-  const response = e.response && typeof e.response === 'object'
-    ? e.response as Record<string, unknown> : {};
-  const status = e.status ?? response.status;
-  const httpStatus = typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
-    ? status : undefined;
+  const httpStatus = numericHttpStatus(error);
   const rawCode = e.code;
   const code = typeof rawCode === 'string' && /^(?:EAI_AGAIN|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ECONNABORTED)$/.test(rawCode)
     ? rawCode : undefined;
-  const category = httpStatus === 401 || httpStatus === 403 ? 'authentication'
+  const category = isRecoveryError(error) ? 'recovery_required'
+    : httpStatus === 401 ? 'authentication'
+    : httpStatus === 403 ? 'authorization'
     : httpStatus !== undefined ? 'sap_http'
     : code ? 'network' : 'unknown';
   return { category, ...(httpStatus === undefined ? {} : { status: httpStatus }), ...(code ? { code } : {}) };
