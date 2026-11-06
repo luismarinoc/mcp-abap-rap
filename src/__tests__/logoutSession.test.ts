@@ -99,7 +99,30 @@ test('HTML 400 with only a leading HTTP status label confirms expired logout and
   expect(b.getObjectSource).toHaveBeenCalledTimes(1);
 });
 
+test('nested semantic span with known HTTP 400 label retires only the expired client', async () => {
+  await call('getObjectSource', { objectSourceUrl: '/same' });
+  const a = instances[0];
+  await call('usarCliente', { cliente: 'B' });
+  await call('getObjectSource', { objectSourceUrl: '/same' });
+  const b = instances[1];
+  await call('usarCliente', { cliente: 'A' });
+  a.logout.mockRejectedValueOnce(expired('<html><body><p>Other context <span>400: SESSION TIMED OUT</span> advice</p></body></html>'));
+  const result = await call('logout');
+  expect(result.isError).not.toBe(true);
+  expect(body(result)).toEqual({ status: 'Logged out successfully' });
+  expect(a.logout).toHaveBeenCalledTimes(1);
+  expect(b.logout).not.toHaveBeenCalled();
+  expect(body(await call('clienteActual')).activo).toBe('A');
+  expect((await call('syntaxCheckCode', { url: '/same' })).isError).toBe(true);
+  await call('usarCliente', { cliente: 'B' });
+  expect(body(await call('syntaxCheckCode', { url: '/same' })).result).toBe('B:source');
+  expect(b.getObjectSource).toHaveBeenCalledTimes(1);
+});
+
 test.each([
+  ['<p>See <span>400: Session timed out for another reason</span> for details</p>', 400, 'text/html'],
+  ['<p>See <span>400: Session timed out</span> for details</p>', 401, 'text/html'],
+  ['<script><span>400: Session timed out</span></script><p>Different problem</p>', 400, 'text/html'],
   [page('400 Different problem'), 400, 'text/html'],
   [page('400 Session timed out for another reason'), 400, 'text/html'],
   [page('Different problem'), 400, 'text/html'],
