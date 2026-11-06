@@ -2,7 +2,9 @@ import { ADTClient, session_types } from 'abap-adt-api';
 import fs from 'fs';
 import path from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
-import { loginSucceeded, observeFailure, recoveryError, recoveryRequired, recoveryVersion, requestTimeout } from './lib/sessionRecovery';
+import { connectionRetired, loginSucceeded, observeFailure, recoveryError, recoveryRequired, recoveryVersion, requestTimeout, retireConnection } from './lib/sessionRecovery';
+import { isExpiredLogoutSession } from './lib/logoutSession';
+import { sourceCache } from './lib/sourceCache';
 
 const proxies = new WeakMap<ADTClient, RegistroClientes>();
 
@@ -133,9 +135,17 @@ export class RegistroClientes {
     return cli;
   }
 
+  private retire(real: ADTClient): void {
+    retireConnection(real);
+    sourceCache.clear(real);
+    for (const [name, client] of this.conexiones) {
+      if (client === real) this.conexiones.delete(name);
+    }
+  }
+
   private observedCall(real: ADTClient, method: (...args: any[]) => any, name: string | symbol) {
     return (...args: any[]) => {
-      if (name !== 'login' && name !== 'logout' && name !== 'dropSession' && recoveryRequired(real)) {
+      if (connectionRetired(real) || (name !== 'login' && name !== 'logout' && name !== 'dropSession' && recoveryRequired(real))) {
         throw recoveryError();
       }
       const version = recoveryVersion(real);
@@ -146,6 +156,10 @@ export class RegistroClientes {
             if (name === 'login') loginSucceeded(real, version);
             return value;
           }, error => {
+            if (name === 'logout' && isExpiredLogoutSession(error)) {
+              this.retire(real);
+              return undefined;
+            }
             observeFailure(real, error, version);
             throw error;
           });
@@ -178,6 +192,7 @@ export class RegistroClientes {
             }
           });
         }
+        if (prop === 'loggedin' && connectionRetired(real)) return false;
         const val = real[prop];
         return typeof val === 'function' ? self.observedCall(real, val.bind(real), prop) : val;
       },

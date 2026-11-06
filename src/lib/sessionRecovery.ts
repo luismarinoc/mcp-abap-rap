@@ -3,6 +3,15 @@ import type { ADTClient } from 'abap-adt-api';
 
 // Identity is the actual pinned connection, never the selected registry name.
 const required = new WeakSet<ADTClient>();
+const retired = new WeakSet<ADTClient>();
+
+export function retireConnection(client: ADTClient): void {
+  retired.add(client);
+}
+
+export function connectionRetired(client: ADTClient): boolean {
+  return retired.has(client);
+}
 const revisions = new WeakMap<ADTClient, number>();
 const marked = new WeakSet<object>();
 const MAX_AXIOS_TIMEOUT = 2147483647;

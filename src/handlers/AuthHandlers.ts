@@ -16,7 +16,7 @@ export class AuthHandlers extends BaseHandler {
       },
       {
         name: 'logout',
-        description: 'Explicitly terminate the selected ABAP session; existing locks may no longer be usable. Failures return safe connection diagnostics.',
+        description: 'Explicitly log out the selected ABAP session. A confirmed already-expired session is treated as logged out locally (not HTTP success); its connection and locks must be reacquired. Other failures return safe connection diagnostics.',
         inputSchema: {
           type: 'object',
           properties: {}
