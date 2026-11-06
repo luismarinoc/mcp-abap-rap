@@ -245,6 +245,7 @@ export class AbapAdtServer extends Server {
             case 'createObjectSafe':
             case 'setSourceByName':
             case 'createAndActivate':
+            case 'createFullRapService':
             case 'checkObjectRegistered':
                 result = await this.rapHandlers.handle(request.params.name, request.params.arguments);
                 break;

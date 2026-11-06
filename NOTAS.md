@@ -63,14 +63,15 @@ destino dice de antemano qué órdenes acepta — conviene consultarlo antes de 
 Tras un error, el lock handle queda inválido en silencio.
 → `setSourceByName` libera siempre en `finally`.
 
-## Pendiente
+## Mejoras implementadas en fuente
 
-- `classIncludes` revienta con *"clas.includes is not iterable"*
-- `packageSearchHelp` devuelve 404
-- `objectTypes` devuelve ~87.000 caracteres; necesita filtro
-- `searchObject` sin paginación ni timeout configurable
-- `login` devuelve una respuesta que rompe el esquema MCP (`invalid_union`)
-- Tool compuesta `createFullRapService` que orqueste los 8 objetos
+- `classIncludes` consulta la estructura de la clase antes de extraer sus inclusiones; sin ellas devuelve `{}`.
+- `packageSearchHelp` usa la ayuda del SDK y valida los cuatro tipos admitidos antes de consultar SAP. Un endpoint válido aún puede devolver 404 según el sistema; no se ha comprobado en SAP real.
+- `objectTypes` admite `filter` opcional (subcadena sin distinguir mayúsculas en tipo, nombre o descripción).
+- `searchObject` admite `offset` (por defecto 0) y `pageSize` (por defecto 100) para recortar localmente un prefijo de hasta 10000 resultados; no añade timeout configurable, total exacto ni instantánea estable.
+- `createFullRapService` usa el RAP Generator existente: valida y previsualiza antes de generar una vez; `dryRun` solo previsualiza. La cantidad de objetos depende del generador; no publica ni revierte cambios.
+
+Ver [inclusiones y ayudas](docs/class-package-tools.md), [descubrimiento](docs/object-discovery-tools.md) y [generador RAP](docs/rap-generator-tool.md). Estas mejoras están en fuente: requieren compilación y reinicio intencionales del servidor MCP para estar activas; no se ha probado la generación contra SAP real.
 
 ## Uso
 

@@ -155,6 +155,17 @@ If your SAP system uses a self-signed certificate, add `"NODE_TLS_REJECT_UNAUTHO
    }
    ```
 
+## RAP fork tools
+
+The fork adds [class includes and package value helps](docs/class-package-tools.md),
+[optional object-type filtering and bounded search pagination](docs/object-discovery-tools.md),
+and [`createFullRapService` using SAP's RAP Generator](docs/rap-generator-tool.md).
+`classIncludes` takes `clas`; `packageSearchHelp` takes one of four supported `type` values and optional `name` (a valid type can still return a system-specific 404).
+`objectTypes` takes optional `filter` (case-insensitive substring of type, name, or description).
+`searchObject` keeps `query`, `objType` and `max` unchanged when paging is omitted; paging uses `offset: 0` and `pageSize: 100` by default, fetches a prefix limited to 10000, and cannot be combined with `max`. It does not provide an exact total, stable snapshot or configurable timeout.
+`createFullRapService` requires `refObjectUri` and `packageName`, defaults `generatorId` to `uiservice` and `dryRun` to false, accepts optional generator `content`, and requires nonblank `transport` to generate outside `$TMP`. The generator requires SAP endpoint support; dry run validates and previews without generating. It does not guarantee eight objects, publish services, or roll back partial creation.
+These source changes require an intentional build and MCP restart to become active; no live SAP generation has been verified.
+
 ## Custom Instruction
 Use this Custom Instruction to explain the tool to your model:
 ```
@@ -166,6 +177,8 @@ This server provides tools for interacting with an SAP system via ADT (ABAP Deve
 
 *   **`searchObject`:** Finds ABAP objects based on a query string (e.g., class name).
     *   `query`: (string, required) The search term.
+    *   `objType` and `max`: optional legacy type filter and result cap.
+    *   `offset` and `pageSize`: optional bounded local pagination; see [limits](docs/object-discovery-tools.md). Omit both for the legacy response.
     *   Returns the object's URI.  Example: `/sap/bc/adt/oo/classes/zcl_invoice_xml_gen_model`
 
 *   **`transportInfo`:** Retrieves transport information for a given object.
