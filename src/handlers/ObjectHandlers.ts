@@ -42,7 +42,17 @@ export class ObjectHandlers extends BaseHandler {
                         },
                         max: {
                             type: 'number',
-                            description: 'Maximum number of results',
+                            description: 'Legacy maximum number of results; cannot be combined with offset or pageSize',
+                            optional: true
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Optional zero-based offset; defaults to 0 when paging. Local slice of an SDK prefix, not remote paging; offset + pageSize must be at most 10000. Results may be truncated, with no exact total or stable snapshot.',
+                            optional: true
+                        },
+                        pageSize: {
+                            type: 'number',
+                            description: 'Optional positive page size; defaults to 100 when paging. Fetches at most 10000 SDK rows; no exact total, stable snapshot, or guaranteed next page.',
                             optional: true
                         }
                     },
@@ -68,7 +78,13 @@ export class ObjectHandlers extends BaseHandler {
                 description: 'Retrieves object types.',
                 inputSchema: {
                     type: 'object',
-                    properties: {}
+                    properties: {
+                        filter: {
+                            type: 'string',
+                            description: 'Optional case-insensitive substring match on type, name, or description',
+                            optional: true
+                        }
+                    }
                 }
             },
             {
@@ -156,13 +172,31 @@ export class ObjectHandlers extends BaseHandler {
     }
 
     async handleSearchObject(args: any): Promise<any> {
+        const paging = args.offset !== undefined || args.pageSize !== undefined;
+        const offset = args.offset === undefined ? 0 : args.offset;
+        const pageSize = args.pageSize === undefined ? 100 : args.pageSize;
+        if (paging) {
+            if (args.max !== undefined) {
+                throw new McpError(ErrorCode.InvalidParams, 'max cannot be combined with offset or pageSize');
+            }
+            if (!Number.isSafeInteger(offset) || offset < 0) {
+                throw new McpError(ErrorCode.InvalidParams, 'offset must be a finite nonnegative integer');
+            }
+            if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
+                throw new McpError(ErrorCode.InvalidParams, 'pageSize must be a finite positive integer');
+            }
+            if (offset + pageSize > 10000) {
+                throw new McpError(ErrorCode.InvalidParams, 'offset + pageSize must be at most 10000');
+            }
+        }
         const startTime = performance.now();
         try {
-            const results = await this.adtclient.searchObject(
+            const fetched = await this.adtclient.searchObject(
                 args.query,
                 args.objType,
-                args.max
+                paging ? offset + pageSize : args.max
             );
+            const results = paging ? fetched.slice(offset, offset + pageSize) : fetched;
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -171,7 +205,8 @@ export class ObjectHandlers extends BaseHandler {
                         text: JSON.stringify({
                             status: 'success',
                             results,
-                            message: 'Object search completed successfully'
+                            message: 'Object search completed successfully',
+                            ...(paging ? { paging: { offset, pageSize, returned: results.length } } : {})
                         }, null, 2)
                     }
                 ]
@@ -190,7 +225,11 @@ export class ObjectHandlers extends BaseHandler {
     async handleObjectTypes(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const types = await this.adtclient.objectTypes();
+            const allTypes = await this.adtclient.objectTypes();
+            const filter = args.filter?.toLowerCase();
+            const types = filter === undefined ? allTypes : allTypes.filter(type =>
+                [type.type, type.name, type.description].some(value => value?.toLowerCase().includes(filter))
+            );
             this.trackRequest(startTime, true);
             return {
                 content: [

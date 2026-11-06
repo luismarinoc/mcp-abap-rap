@@ -1,0 +1,7 @@
+# Descubrimiento de objetos
+
+`objectTypes` acepta `filter` opcional: busca una subcadena sin distinguir mayúsculas/minúsculas en `type`, `name` o `description`. Por ejemplo, `{ "filter": "clas" }` devuelve los tipos coincidentes. Sin `filter`, devuelve exactamente el formato y la lista anteriores.
+
+`searchObject` conserva `query` obligatorio y los argumentos existentes `objType` y `max`. Sin `offset` ni `pageSize`, la llamada al SDK y la respuesta son las anteriores. Para paginar localmente, indique `offset` (entero no negativo, desde cero) o `pageSize` (entero positivo). Si falta alguno, se usan `offset: 0` y `pageSize: 100`. Ejemplo: `{ "query": "Z*", "objType": "CLAS", "offset": 20, "pageSize": 10 }` solicita al SDK un prefijo de 30 resultados y devuelve los índices 20–29. La respuesta agrega `paging: { "offset": 20, "pageSize": 10, "returned": 10 }` cuando hay suficientes resultados.
+
+El SDK no ofrece paginación remota. Cada llamada obtiene el prefijo `offset + pageSize` y luego recorta localmente; ese prefijo no puede superar **10000** resultados. Los resultados pueden quedar truncados; `returned` solo cuenta los elementos de esta respuesta, no es un total. No hay total exacto, indicador fiable de más páginas ni instantánea estable entre llamadas. `max` no se puede combinar con `offset` o `pageSize`: se rechaza la combinación antes de llamar a SAP, para no ampliar silenciosamente un límite heredado.
