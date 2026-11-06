@@ -1,6 +1,7 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
 import type { ToolDefinition } from '../types/tools';
+import type { RapGeneratorContent, RapGeneratorId, RapGeneratorValidationResult, RapGeneratorPreviewObject } from 'abap-adt-api';
 
 const esc = (s: any): string =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -138,6 +139,22 @@ export class RapHandlers extends BaseHandler {
         }
       },
       {
+        name: 'createFullRapService',
+        description: 'Validate and preview RAP Generator output before generating once. Preview is not proof of creation; dryRun only previews. Does not publish, retry or roll back.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            generatorId: { type: 'string', description: 'uiservice (default) | webapiservice', optional: true },
+            refObjectUri: { type: 'string', description: 'Local /sap/bc/adt/... reference object URI' },
+            packageName: { type: 'string', description: 'Destination package, e.g. ZPKG or $TMP' },
+            content: { type: 'object', description: 'Optional SDK RapGeneratorContent; if omitted use validated server defaults', optional: true },
+            transport: { type: 'string', description: 'Required nonblank for non-$TMP generation; $TMP sends empty corrNr', optional: true },
+            dryRun: { type: 'boolean', description: 'Validate and preview only (default false)', optional: true }
+          },
+          required: ['refObjectUri', 'packageName']
+        }
+      },
+      {
         name: 'checkObjectRegistered',
         description: 'Check whether an object has a TADIR entry (is registered in a package). Detects orphan objects.',
         inputSchema: {
@@ -161,6 +178,10 @@ export class RapHandlers extends BaseHandler {
       case 'createAndActivate': {
         const result = await this.createAndActivate(args);
         return this.ok(result, !result.activated);
+      }
+      case 'createFullRapService': {
+        const result = await this.createFullRapService(args);
+        return this.ok(result.payload, result.failed);
       }
       case 'checkObjectRegistered': return this.ok(await this.checkRegistered(args.objtype, args.name));
       default:
@@ -349,6 +370,88 @@ ${a.transportLayer ? `<pak:transportLayer pak:name="${esc(a.transportLayer)}"/>`
     if (writeError) throw writeError;
     if (unlockError) this.fail('Source unlock failed after write. Check the object lock before retrying.');
     return { written: sourceUrl, bytes: a.source.length };
+  }
+
+  private async createFullRapService(args: any): Promise<{ payload: object; failed: boolean }> {
+    const failure = (diagnostic: string, extra: object = {}) => ({
+      failed: true, payload: { generated: false, diagnostic, ...extra }
+    });
+    const record = (value: any): value is Record<string, any> =>
+      value !== null && typeof value === 'object' && !Array.isArray(value);
+    const nonblank = (value: any): value is string => typeof value === 'string' && value.trim().length > 0;
+    const contentValid = (value: any): value is RapGeneratorContent =>
+      record(value) && (!('metadata' in value) || (record(value.metadata) && nonblank(value.metadata.package) &&
+        (value.metadata.masterLanguage === undefined || nonblank(value.metadata.masterLanguage)))) &&
+      record(value.general) && nonblank(value.general.description) &&
+      (value.general.referenceObjectName === undefined || nonblank(value.general.referenceObjectName)) &&
+      record(value.businessObject) && record(value.businessObject.dataModelEntity) &&
+      nonblank(value.businessObject.dataModelEntity.cdsName) &&
+      (value.businessObject.dataModelEntity.entityName === undefined || nonblank(value.businessObject.dataModelEntity.entityName)) &&
+      record(value.businessObject.behavior) && nonblank(value.businessObject.behavior.implementationType) &&
+      nonblank(value.businessObject.behavior.implementationClass) && nonblank(value.businessObject.behavior.draftTable) &&
+      record(value.serviceProjection) && nonblank(value.serviceProjection.name) &&
+      record(value.businessService) && record(value.businessService.serviceDefinition) &&
+      nonblank(value.businessService.serviceDefinition.name) &&
+      record(value.businessService.serviceBinding) && nonblank(value.businessService.serviceBinding.name) &&
+      nonblank(value.businessService.serviceBinding.bindingType);
+    const validationFailed = (v: RapGeneratorValidationResult): boolean =>
+      !v || !['ok', 'warning', 'info'].includes(v.severity);
+    const diagnostic = (phase: string, v: RapGeneratorValidationResult) =>
+      `${phase} validation failed (${v && typeof v.severity === 'string' && /^(ok|warning|info|error)$/.test(v.severity) ? v.severity : 'unknown severity'})`;
+    const refsValid = (value: any): value is RapGeneratorPreviewObject[] =>
+      Array.isArray(value) && value.every(item => record(item) &&
+        nonblank(item.uri) && nonblank(item.type) && nonblank(item.name) && typeof item.description === 'string');
+
+    if (!record(args)) return failure('Invalid input object');
+    const genId: RapGeneratorId = args.generatorId === undefined ? 'uiservice' : args.generatorId;
+    if (genId !== 'uiservice' && genId !== 'webapiservice') return failure('Invalid generatorId');
+    if (!nonblank(args.refObjectUri) || !/^\/sap\/bc\/adt\/[a-zA-Z0-9/_~.%-]+$/.test(args.refObjectUri) ||
+      args.refObjectUri.includes('..')) return failure('Invalid local refObjectUri');
+    if (!nonblank(args.packageName)) return failure('Invalid packageName');
+    if (args.dryRun !== undefined && typeof args.dryRun !== 'boolean') return failure('Invalid dryRun');
+    if (args.transport !== undefined && (typeof args.transport !== 'string' ||
+      (args.transport.trim() === '' && args.packageName !== '$TMP'))) return failure('Invalid transport');
+    if (!args.dryRun && args.packageName !== '$TMP' && !nonblank(args.transport)) return failure('transport required for non-$TMP generation');
+    if (args.content !== undefined && !contentValid(args.content)) return failure('Invalid content shape');
+    if (args.content?.metadata?.package && args.content.metadata.package !== args.packageName)
+      return failure('content metadata package does not match packageName');
+
+    const client = this.adtclient;
+    let initial: RapGeneratorValidationResult;
+    try { initial = await client.rapGenValidateInitial(genId, args.refObjectUri, args.packageName); }
+    catch { return failure('Initial validation unavailable; no generation attempted'); }
+    if (validationFailed(initial)) return failure(diagnostic('Initial', initial));
+
+    let content: RapGeneratorContent;
+    if (args.content !== undefined) {
+      content = { ...args.content, metadata: { ...args.content.metadata, package: args.packageName } };
+    } else {
+      let defaults: unknown;
+      try { defaults = await client.rapGenGetContent(genId, args.refObjectUri, args.packageName); }
+      catch { return failure('Generator defaults unavailable; no generation attempted'); }
+      if (!contentValid(defaults)) return failure('Invalid default content shape');
+      if (defaults.metadata && defaults.metadata.package !== args.packageName)
+        return failure('Default content metadata package does not match packageName');
+      content = { ...defaults, metadata: { ...defaults.metadata, package: args.packageName } };
+    }
+
+    let final: RapGeneratorValidationResult;
+    try { final = await client.rapGenValidateContent(genId, args.refObjectUri, content); }
+    catch { return failure('Content validation unavailable; no generation attempted'); }
+    if (validationFailed(final)) return failure(diagnostic('Content', final));
+
+    let preview: RapGeneratorPreviewObject[];
+    try { preview = await client.rapGenPreview(genId, args.refObjectUri, content); }
+    catch { return failure('Preview unavailable; no generation attempted'); }
+    if (!refsValid(preview)) return failure('Malformed preview; no generation attempted');
+    if (args.dryRun) return { failed: false, payload: { generated: false, preview } };
+
+    let objects: RapGeneratorPreviewObject[];
+    try { objects = await client.rapGenGenerate(genId, args.refObjectUri, args.transport || '', content); }
+    catch { return failure('Generation outcome uncertain; inspect SAP before any retry', { uncertain: true, preview }); }
+    if (!refsValid(objects) || objects.length === 0)
+      return failure('Generation response empty or malformed; outcome uncertain; inspect SAP before any retry', { uncertain: true, preview });
+    return { failed: false, payload: { generated: true, preview, objects } };
   }
 
   private async createAndActivate(a: any) {
