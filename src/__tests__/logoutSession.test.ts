@@ -79,7 +79,29 @@ test('confirmed expired logout is idempotent, retires only A and leaves stale so
   expect(instances.filter(c => c.url === 'A')).toHaveLength(4);
 });
 
+test('HTML 400 with only a leading HTTP status label confirms expired logout and isolates the retired identity', async () => {
+  await call('getObjectSource', { objectSourceUrl: '/same' });
+  const a = instances[0];
+  await call('usarCliente', { cliente: 'B' });
+  await call('getObjectSource', { objectSourceUrl: '/same' });
+  const b = instances[1];
+  await call('usarCliente', { cliente: 'A' });
+  a.logout.mockRejectedValueOnce(expired(page('400 Session timed out')));
+  const result = await call('logout');
+  expect(result.isError).not.toBe(true);
+  expect(body(result)).toEqual({ status: 'Logged out successfully' });
+  expect(a.logout).toHaveBeenCalledTimes(1);
+  expect(b.logout).not.toHaveBeenCalled();
+  expect(body(await call('clienteActual')).activo).toBe('A');
+  expect((await call('syntaxCheckCode', { url: '/same' })).isError).toBe(true);
+  await call('usarCliente', { cliente: 'B' });
+  expect(body(await call('syntaxCheckCode', { url: '/same' })).result).toBe('B:source');
+  expect(b.getObjectSource).toHaveBeenCalledTimes(1);
+});
+
 test.each([
+  [page('400 Different problem'), 400, 'text/html'],
+  [page('400 Session timed out for another reason'), 400, 'text/html'],
   [page('Different problem'), 400, 'text/html'],
   ['<script>Session timed out</script><p>Different problem</p>', 400, 'text/html'],
   ['<p>See Session timed out for help</p>', 400, 'text/html'],

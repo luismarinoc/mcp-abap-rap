@@ -8,7 +8,7 @@ export class AuthHandlers extends BaseHandler {
     return [
       {
         name: 'login',
-        description: 'Explicitly authenticate the selected ABAP session to clear recovery-required state after inspecting uncertain write outcomes. Reacquire locks deliberately; login does not restore lost locks. Failures retain recovery-required state.',
+        description: 'Explicitly authenticate the selected ABAP session to clear recovery-required state after inspecting uncertain write outcomes. Returns a fixed success status, not SDK login data. Reacquire locks deliberately; login does not restore lost locks. Failures retain recovery-required state.',
         inputSchema: {
           type: 'object',
           properties: {}
@@ -49,13 +49,13 @@ export class AuthHandlers extends BaseHandler {
   private async handleLogin(args: any) {
     const startTime = performance.now();
     try {
-      const loginResult = await this.adtclient.login();
+      await this.adtclient.login();
       this.trackRequest(startTime, true);
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(loginResult)
+            text: JSON.stringify({ status: 'Logged in successfully' })
           }
         ]
       };

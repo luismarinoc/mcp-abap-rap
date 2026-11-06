@@ -71,7 +71,7 @@ test('401 failed write runs once, gates later edits before backend, and only suc
   expect(body(await call('dropSession'))).toEqual({ status: 'Session cleared' });
   expect(body(await write()).diagnostic.category).toBe('recovery_required');
   expect(client.setObjectSource).toHaveBeenCalledTimes(1);
-  expect(body(await call('login'))).toEqual({});
+  expect(body(await call('login'))).toEqual({ status: 'Logged in successfully' });
   expect(body(await write())).toMatchObject({ status: 'success', updated: true });
   expect(client.setObjectSource).toHaveBeenCalledTimes(2);
 });
@@ -157,9 +157,15 @@ test('late old-session failure does not poison a successfully reauthenticated cl
   client.getObjectSource.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
   const pending = read();
   await new Promise(resolve => setImmediate(resolve));
-  expect(body(await call('login'))).toEqual({});
-  rejectOld(Object.assign(new Error('SECRET'), { err: 401 }));
-  const oldFailure = await pending;
+  let loginResult: Awaited<ReturnType<typeof call>>;
+  let oldFailure!: Awaited<ReturnType<typeof read>>;
+  try {
+    loginResult = await call('login');
+  } finally {
+    rejectOld(Object.assign(new Error('SECRET'), { err: 401 }));
+    oldFailure = await pending; // Settle the pinned read before closing the transport, even if login fails.
+  }
+  expect(body(loginResult)).toEqual({ status: 'Logged in successfully' });
   expect(body(oldFailure).diagnostic).toEqual({ category: 'authentication', status: 401 });
   expect(JSON.stringify(oldFailure)).not.toContain('SECRET');
   expect(body(await write()).updated).toBe(true);

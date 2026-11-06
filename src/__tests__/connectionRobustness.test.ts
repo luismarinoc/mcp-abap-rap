@@ -112,6 +112,29 @@ test('read 401 requires explicit login before a later read succeeds', async () =
   expect(client.getObjectSource).toHaveBeenCalledTimes(3);
 });
 
+test('login with a void SDK result returns valid safe MCP text and preserves later reads', async () => {
+  await call('getObjectSource', { objectSourceUrl: '/initialize' });
+  instances[0].login.mockResolvedValueOnce(undefined);
+  const result = await call('login');
+  expect(result.isError).not.toBe(true);
+  expect(typeof (result.content as any)[0].text).toBe('string');
+  expect(body(result)).toEqual({ status: 'Logged in successfully' });
+  expect(instances[0].login).toHaveBeenCalledTimes(1);
+  expect(body(await call('getObjectSource', { objectSourceUrl: '/after-login' })).source).toBe('system-A:source');
+});
+
+test('login never exposes a non-void SDK result', async () => {
+  await call('getObjectSource', { objectSourceUrl: '/initialize' });
+  const client = instances[0];
+  client.login.mockResolvedValueOnce({ logged: true, token: 'PRIVATE_TOKEN' });
+  const result = await call('login');
+  expect(result.isError).not.toBe(true);
+  expect(typeof (result.content as any)[0].text).toBe('string');
+  expect(body(result)).toEqual({ status: 'Logged in successfully' });
+  expect(JSON.stringify(result)).not.toContain('PRIVATE_TOKEN');
+  expect(client.login).toHaveBeenCalledTimes(1);
+});
+
 test('failed write is classified, never replayed, and recovery is explicit', async () => {
   await call('getObjectSource', { objectSourceUrl: '/initialize' });
   const client = instances[0];
@@ -125,7 +148,7 @@ test('failed write is classified, never replayed, and recovery is explicit', asy
   expect(client.dropSession).not.toHaveBeenCalled();
   expect(body(await call('dropSession'))).toEqual({ status: 'Session cleared' });
   expect(body(await call('getObjectSource', { objectSourceUrl: '/after' })).diagnostic).toEqual({ category: 'recovery_required' });
-  expect(body(await call('login'))).toEqual({});
+  expect(body(await call('login'))).toEqual({ status: 'Logged in successfully' });
   expect(body(await call('getObjectSource', { objectSourceUrl: '/after' })).source).toBe('system-A:source');
   expect(client.setObjectSource).toHaveBeenCalledTimes(1);
 });
@@ -148,7 +171,7 @@ test.each([
   expect(success.isError).not.toBe(true);
   expect(body(success)).toEqual(tool === 'lock' ? { status: 'success', lockHandle: 'handle', message: 'Object locked successfully' }
     : tool === 'unLock' ? { status: 'success', message: 'Object unlocked successfully' }
-    : tool === 'login' ? {} : tool === 'logout' ? { status: 'Logged out successfully' } : { status: 'Session cleared' });
+    : tool === 'login' ? { status: 'Logged in successfully' } : tool === 'logout' ? { status: 'Logged out successfully' } : { status: 'Session cleared' });
   expect(client[method]).toHaveBeenCalledTimes(2);
 });
 
@@ -179,7 +202,7 @@ test('switching while a request is pending retains its pinned client and isolate
 });
 
 test('explicit login and dropSession remain available and do not run automatically', async () => {
-  expect(body(await call('login'))).toEqual({});
+  expect(body(await call('login'))).toEqual({ status: 'Logged in successfully' });
   expect(body(await call('dropSession'))).toEqual({ status: 'Session cleared' });
   expect(instances[0].login).toHaveBeenCalledTimes(1);
   expect(instances[0].dropSession).toHaveBeenCalledTimes(1);

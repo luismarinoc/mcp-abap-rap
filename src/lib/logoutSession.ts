@@ -19,7 +19,7 @@ export function isExpiredLogoutSession(error: unknown): boolean {
   const elements = visible.matchAll(/<(p|span|h[1-6])\b[^>]*>([\s\S]*?)<\/\1\s*>/gi);
   for (const element of elements) {
     const text = element[2].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (text === 'Session timed out') return true;
+    if (/^(?:400 )?Session timed out$/.test(text)) return true;
   }
   return false;
 }
