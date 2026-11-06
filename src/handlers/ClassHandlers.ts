@@ -8,7 +8,7 @@ export class ClassHandlers extends BaseHandler {
         return [
             {
                 name: 'classIncludes',
-                description: 'Get class includes structure',
+                description: 'Get include source URLs for an ABAP class by name',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -51,7 +51,11 @@ export class ClassHandlers extends BaseHandler {
     async handleClassIncludes(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await ADTClient.classIncludes(args.clas);
+            const classUrl = `/sap/bc/adt/oo/classes/${encodeURIComponent(args.clas)}`;
+            const structure = await this.adtclient.objectStructure(classUrl);
+            const result = 'includes' in structure && Array.isArray(structure.includes)
+                ? Object.fromEntries(ADTClient.classIncludes(structure))
+                : {};
             this.trackRequest(startTime, true);
             return {
                 content: [

@@ -59,13 +59,13 @@ export class DdicHandlers extends BaseHandler {
             },
             {
                 name: 'packageSearchHelp',
-                description: 'Performs a package search help.',
+                description: 'Looks up package value help for applicationcomponents, softwarecomponents, transportlayers, or translationrelevances (availability depends on SAP).',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         type: {
                             type: 'string',
-                            description: 'The package value help type.'
+                            description: 'One of applicationcomponents, softwarecomponents, transportlayers, translationrelevances.'
                         },
                         name: {
                             type: 'string',
@@ -175,9 +175,18 @@ export class DdicHandlers extends BaseHandler {
     }
 
     async handlePackageSearchHelp(args: any): Promise<any> {
+        const supported: PackageValueHelpType[] = [
+            'applicationcomponents', 'softwarecomponents', 'transportlayers', 'translationrelevances'
+        ];
+        if (!supported.includes(args?.type)) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `Invalid package value help type; expected one of: ${supported.join(', ')}`
+            );
+        }
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.packageSearchHelp(args.type, args.name);
+            const result = await this.adtclient.packageSearchHelp(args.type as PackageValueHelpType, args.name);
             this.trackRequest(startTime, true);
             return {
                 content: [
