@@ -1,0 +1,13 @@
+{
+  "porDefecto": "default",
+  "clientes": {
+    "default": {
+      "descripcion": "Example development system",
+      "url": "https://sap.example.invalid:44300",
+      "mandante": "000",
+      "usuario": "YOUR_USER",
+      "password": "YOUR_PASSWORD",
+      "idioma": "EN"
+    }
+  }
+}
