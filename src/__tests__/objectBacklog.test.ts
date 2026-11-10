@@ -1,4 +1,3 @@
-jest.mock('../handlers/BaseHandler.js', () => require('../handlers/BaseHandler'), { virtual: true });
 import { ObjectHandlers } from '../handlers/ObjectHandlers';
 import type { ADTClient } from 'abap-adt-api';
 

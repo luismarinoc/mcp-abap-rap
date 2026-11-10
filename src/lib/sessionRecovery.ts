@@ -57,6 +57,12 @@ export function recoveryRequired(client: ADTClient): boolean {
   return required.has(client);
 }
 
+/** An interrupted operation has an unknown outcome; only explicit login clears it. */
+export function interruptConnection(client: ADTClient): void {
+  required.add(client);
+  revisions.set(client, recoveryVersion(client) + 1);
+}
+
 export function recoveryVersion(client: ADTClient): number {
   return revisions.get(client) ?? 0;
 }

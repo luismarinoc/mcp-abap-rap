@@ -1,48 +1,51 @@
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { BaseHandler } from './BaseHandler.js';
-import type { ToolDefinition } from '../types/tools.js';
-import { connectionError } from '../lib/connectionDiagnostics';
+import { stringify } from "../lib/results.js";
+import { McpError, ErrorCode } from "../lib/errors.js";
+import { BaseHandler } from "./BaseHandler.js";
+import type { ToolDefinition } from "../types/tools.js";
 
 export class AuthHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
     return [
       {
-        name: 'login',
-        description: 'Explicitly authenticate the selected ABAP session to clear recovery-required state after inspecting uncertain write outcomes. Returns a fixed success status, not SDK login data. Reacquire locks deliberately; login does not restore lost locks. Failures retain recovery-required state.',
+        name: "login",
+        description: "Explicitly authenticate after inspecting uncertain writes; reacquire locks deliberately. No write is replayed.",
         inputSchema: {
-          type: 'object',
-          properties: {}
-        }
+          type: "object",
+          properties: {},
+        },
       },
       {
-        name: 'logout',
-        description: 'Explicitly log out the selected ABAP session. A confirmed already-expired session is treated as logged out locally (not HTTP success); its connection and locks must be reacquired. Other failures return safe connection diagnostics.',
+        name: "logout",
+        description: "Terminate the selected ABAP session; reacquire locks before later writes.",
         inputSchema: {
-          type: 'object',
-          properties: {}
-        }
+          type: "object",
+          properties: {},
+        },
       },
       {
-        name: 'dropSession',
-        description: 'Explicitly drop the selected ABAP session after inspecting uncertain write outcomes. Drop alone does not clear recovery-required state or cached cookies/CSRF: login explicitly and reacquire locks; no write is replayed.',
+        name: "dropSession",
+        description: "Clear local session cache; after uncertain writes explicitly login and reacquire locks. No write is replayed.",
         inputSchema: {
-          type: 'object',
-          properties: {}
-        }
-      }
+          type: "object",
+          properties: {},
+        },
+      },
     ];
   }
 
   async handle(toolName: string, args: any): Promise<any> {
     switch (toolName) {
-      case 'login':
+      case "login":
         return this.handleLogin(args);
-      case 'logout':
+      case "logout":
         return this.handleLogout(args);
-      case 'dropSession':
+      case "dropSession":
         return this.handleDropSession(args);
       default:
-        throw new McpError(ErrorCode.MethodNotFound, `Unknown auth tool: ${toolName}`);
+        throw new McpError(
+          ErrorCode.MethodNotFound,
+          `Unknown auth tool: ${toolName}`,
+        );
     }
   }
 
@@ -54,14 +57,14 @@ export class AuthHandlers extends BaseHandler {
       return {
         content: [
           {
-            type: 'text',
-            text: JSON.stringify({ status: 'Logged in successfully' })
-          }
-        ]
+            type: "text",
+            text: stringify({ status: "Logged in successfully" }),
+          },
+        ],
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw connectionError(error, 'Login failed');
+      throw error;
     }
   }
 
@@ -73,33 +76,34 @@ export class AuthHandlers extends BaseHandler {
       return {
         content: [
           {
-            type: 'text',
-            text: JSON.stringify({ status: 'Logged out successfully' })
-          }
-        ]
+            type: "text",
+            text: stringify({ status: "Logged out successfully" }),
+          },
+        ],
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw connectionError(error, 'Logout failed');
+      throw error;
     }
   }
 
   private async handleDropSession(args: any) {
     const startTime = performance.now();
     try {
+      this.sourceCache.clear();
       await this.adtclient.dropSession();
       this.trackRequest(startTime, true);
       return {
         content: [
           {
-            type: 'text', 
-            text: JSON.stringify({ status: 'Session cleared' })
-          }
-        ]
+            type: "text",
+            text: stringify({ status: "Session cleared" }),
+          },
+        ],
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw connectionError(error, 'Drop session failed');
+      throw error;
     }
   }
 }

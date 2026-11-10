@@ -1,37 +1,53 @@
-/**
- * In-memory ABAP source cache partitioned by actual ADT connection identity.
- * Reloading clients creates fresh connections, so old sources cannot leak across reloads.
- */
-import type { ADTClient } from 'abap-adt-api';
+import { createHash } from "node:crypto";
+import type { ADTClient } from "abap-adt-api";
 
-let cache = new WeakMap<ADTClient, Map<string, string>>();
-
-function entries(client: ADTClient): Map<string, string> {
-  let entry = cache.get(client);
-  if (!entry) {
-    entry = new Map();
-    cache.set(client, entry);
+/** One bounded source cache per physical ADT connection; reload never shares sources. */
+export class SourceCache {
+  private entries = new Map<string, { source: string; expires: number; bytes: number }>();
+  private bytes = 0;
+  constructor(
+    private readonly maxBytes = 8 * 1024 * 1024,
+    private readonly ttlMs = 300000,
+    private readonly maxEntries = 64,
+  ) {}
+  set(url: string, source: string) {
+    this.delete(url);
+    const bytes = Buffer.byteLength(source);
+    if (bytes > this.maxBytes) return;
+    this.entries.set(url, { source, bytes, expires: Date.now() + this.ttlMs });
+    this.bytes += bytes;
+    while (this.entries.size > this.maxEntries || this.bytes > this.maxBytes)
+      this.delete(this.entries.keys().next().value!);
   }
-  return entry;
+  get(url: string) {
+    const e = this.entries.get(url);
+    if (!e) return;
+    if (e.expires <= Date.now()) {
+      this.delete(url);
+      return;
+    }
+    return e.source;
+  }
+  has(url: string) { return this.get(url) !== undefined; }
+  delete(url: string) {
+    const e = this.entries.get(url);
+    if (e) this.bytes -= e.bytes;
+    this.entries.delete(url);
+  }
+  clear() { this.entries.clear(); this.bytes = 0; }
+  static hash(source: string) { return createHash("sha256").update(source).digest("hex"); }
 }
 
-export const sourceCache = {
-  set(url: string, source: string, client: ADTClient): void {
-    if (typeof url === 'string' && url.length > 0 && typeof source === 'string') {
-      entries(client).set(url, source);
-    }
-  },
-  get(url: string, client: ADTClient): string | undefined {
-    return entries(client).get(url);
-  },
-  has(url: string, client: ADTClient): boolean {
-    return entries(client).has(url);
-  },
-  delete(url: string, client: ADTClient): void {
-    entries(client).delete(url);
-  },
-  clear(client?: ADTClient): void {
-    if (client) cache.delete(client);
-    else cache = new WeakMap();
+const byConnection = new WeakMap<ADTClient, SourceCache>();
+export function cacheFor(client: ADTClient): SourceCache {
+  let cache = byConnection.get(client);
+  if (!cache) {
+    cache = new SourceCache();
+    byConnection.set(client, cache);
   }
-};
+  return cache;
+}
+export function clearConnectionCache(client: ADTClient): void {
+  byConnection.get(client)?.clear();
+  byConnection.delete(client);
+}

@@ -1,11 +1,10 @@
 jest.mock('dotenv', () => ({ config: jest.fn() }));
-jest.mock('../handlers/BaseHandler.js', () => require('../handlers/BaseHandler'), { virtual: true });
-jest.mock('../lib/sourceCache.js', () => require('../lib/sourceCache'), { virtual: true });
-jest.mock('fs', () => ({ __esModule: true, default: { existsSync: jest.fn(() => true), readFileSync: jest.fn(() => JSON.stringify({ porDefecto: 'A', clientes: { A: { url: 'A', usuario: 'test', password: 'test' }, B: { url: 'B', usuario: 'test', password: 'test' } } })) } }));
+jest.mock('fs', () => ({ __esModule: true, default: { existsSync: jest.fn(() => true), readFileSync: jest.fn(() => JSON.stringify({ porDefecto: 'A', clientes: { A: { url: 'https://system-a.invalid', usuario: 'test', password: 'test' }, B: { url: 'https://system-b.invalid', usuario: 'test', password: 'test' } } })) } }));
 const instances: any[] = [];
 jest.mock('abap-adt-api', () => ({
   session_types: { stateful: 'stateful' },
-  ADTClient: jest.fn().mockImplementation((url: string) => {
+  ADTClient: jest.fn().mockImplementation((origin: any) => {
+    const url = origin.base.hostname === 'system-a.invalid' ? 'A' : 'B';
     const client: any = {
       url, loggedin: false,
       getObjectSource: jest.fn(async () => url + ':source'),
@@ -20,7 +19,7 @@ jest.mock('abap-adt-api', () => ({
   })
 }));
 import { ADTClient } from 'abap-adt-api';
-import { AbapAdtServer } from '../index';
+import { AbapAdtServer } from './publicServer';
 import { RegistroClientes } from '../clients';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';

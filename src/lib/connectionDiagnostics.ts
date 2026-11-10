@@ -1,5 +1,5 @@
-import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { isRecoveryError, numericHttpStatus } from './sessionRecovery';
+import { McpError, ErrorCode } from './errors.js';
+import { isRecoveryError, numericHttpStatus } from './sessionRecovery.js';
 
 // Only errors created by the selected core handlers carry a diagnostic into dispatch.
 // Keep it outside McpError.data: arbitrary SDK errors may have untrusted data.

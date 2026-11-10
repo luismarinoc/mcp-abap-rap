@@ -1,5 +1,15 @@
 .env
+.env.*
+!.env.example
 dist
 node_modules
 package-lock.json
 *.code-workspace
+clientes.json
+coverage/
+.gentle-shell-diagnostic.*/
+.pnpm-repair-backup.*/
+*.bak-????????-??????
+*.tgz
+.local-builds/
+.local-backups/

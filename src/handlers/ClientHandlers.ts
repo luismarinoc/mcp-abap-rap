@@ -1,7 +1,7 @@
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { BaseHandler } from './BaseHandler';
-import type { ToolDefinition } from '../types/tools';
-import type { RegistroClientes } from '../clients';
+import { McpError, ErrorCode } from "../lib/errors.js";
+import { BaseHandler } from "./BaseHandler.js";
+import type { ToolDefinition } from "../types/tools.js";
+import type { RegistroClientes } from "../clients.js";
 
 export class ClientHandlers extends BaseHandler {
   private registro: RegistroClientes;
@@ -53,7 +53,7 @@ export class ClientHandlers extends BaseHandler {
       }
     } catch (e: any) {
       if (e instanceof McpError) throw e;
-      throw new McpError(ErrorCode.InternalError, e?.message || 'Error');
+      throw new McpError(ErrorCode.InvalidParams, 'Unknown client or client configuration invalid');
     }
   }
 }

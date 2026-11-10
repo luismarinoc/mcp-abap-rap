@@ -1,4 +1,4 @@
-import { numericHttpStatus } from './sessionRecovery';
+import { numericHttpStatus } from './sessionRecovery.js';
 
 /** Only the SDK's HTTP response, not an exception message, can confirm an absent session. */
 export function isExpiredLogoutSession(error: unknown): boolean {

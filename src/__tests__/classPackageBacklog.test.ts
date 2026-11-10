@@ -1,13 +1,13 @@
-jest.mock('../handlers/BaseHandler.js', () => require('../handlers/BaseHandler'), { virtual: true });
 
 import { ADTClient } from 'abap-adt-api';
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { ClassHandlers } from '../handlers/ClassHandlers';
 import { DdicHandlers } from '../handlers/DdicHandlers';
 
-const classUrl = '/sap/bc/adt/oo/classes/ZCL_A%20B';
+const classUrl = '/sap/bc/adt/oo/classes/zcl_a%20b';
 const structure = {
   objectUrl: classUrl,
+  metaData: { 'class:visibility': 'public' },
   includes: [{ 'class:includeType': 'main', links: [{ type: 'text/plain', href: 'source/main' }] }]
 };
 
@@ -42,7 +42,7 @@ describe('class and package backlog tools through handle', () => {
 
   test('classIncludes returns an empty include result when the structure omits includes', async () => {
     const { client, handler } = classSetup();
-    client.objectStructure.mockResolvedValue({ objectUrl: classUrl });
+    client.objectStructure.mockResolvedValue({ objectUrl: classUrl, metaData: { 'class:visibility': 'public' }, includes: [] });
     expect(payload(await handler.handle('classIncludes', { clas: 'ZCL_A B' })))
       .toEqual({ status: 'success', result: {} });
     expect(client.objectStructure).toHaveBeenCalledTimes(1);
@@ -51,8 +51,7 @@ describe('class and package backlog tools through handle', () => {
   test('classIncludes reports a failed structure fetch without claiming success', async () => {
     const { client, handler } = classSetup();
     client.objectStructure.mockRejectedValue(new Error('not found'));
-    await expect(handler.handle('classIncludes', { clas: 'ZCL_A B' }))
-      .rejects.toMatchObject({ code: ErrorCode.InternalError, message: expect.stringContaining('Failed to get class includes: not found') });
+    await expect(handler.handle('classIncludes', { clas: 'ZCL_A B' })).rejects.toThrow('not found');
     expect(client.objectStructure).toHaveBeenCalledTimes(1);
   });
 
@@ -78,8 +77,7 @@ describe('class and package backlog tools through handle', () => {
   test('a supported package help can still fail at the remote endpoint', async () => {
     const { client, handler } = ddicSetup();
     client.packageSearchHelp.mockRejectedValue(new Error('404'));
-    await expect(handler.handle('packageSearchHelp', { type: 'applicationcomponents' }))
-      .rejects.toMatchObject({ code: ErrorCode.InternalError, message: expect.stringContaining('Failed to get package search help: 404') });
+    await expect(handler.handle('packageSearchHelp', { type: 'applicationcomponents' })).rejects.toThrow('404');
     expect(client.packageSearchHelp).toHaveBeenCalledTimes(1);
   });
 

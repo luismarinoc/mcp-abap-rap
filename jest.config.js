@@ -1,6 +1,8 @@
 /** @type {import('ts-jest').JestConfigWithTsJest} */
-module.exports = {
+export default {
   preset: 'ts-jest',
+  transform: { '^.+\\.tsx?$': ['ts-jest', { diagnostics: false, tsconfig: { module: 'CommonJS', moduleResolution: 'node', esModuleInterop: true, resolveJsonModule: true, types: ['node', 'jest'] } }] },
+  moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts'],

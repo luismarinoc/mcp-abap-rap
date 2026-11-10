@@ -1,6 +1,6 @@
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { BaseHandler } from './BaseHandler';
-import type { ToolDefinition } from '../types/tools';
+import { McpError, ErrorCode } from "../lib/errors.js";
+import { BaseHandler } from "./BaseHandler.js";
+import type { ToolDefinition } from "../types/tools.js";
 import type { RapGeneratorContent, RapGeneratorId, RapGeneratorValidationResult, RapGeneratorPreviewObject } from 'abap-adt-api';
 
 const esc = (s: any): string =>
@@ -220,17 +220,22 @@ export class RapHandlers extends BaseHandler {
   }
 
   private async rawRequest(args: any) {
-    const cfg: any = { method: (args.method || 'GET').toUpperCase(), headers: {} };
-    if (args.body) cfg.body = args.body;
+    const method = (args.method || 'GET').toUpperCase();
+    if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method)) this.fail('method must be GET, POST, PUT or DELETE');
+    const cfg: any = { method, headers: {} };
+    if (args.body !== undefined) cfg.body = args.body;
     if (args.contentType) cfg.headers['Content-Type'] = args.contentType;
     if (args.accept) cfg.headers['Accept'] = args.accept;
-    if (args.qs) { try { cfg.qs = JSON.parse(args.qs); } catch { this.fail('qs must be a JSON object'); } }
+    if (args.qs) {
+      try { cfg.qs = JSON.parse(args.qs); } catch { this.fail('qs must be a JSON object'); }
+      if (!cfg.qs || Array.isArray(cfg.qs) || typeof cfg.qs !== 'object') this.fail('qs must be a JSON object');
+    }
     const res = await this.http.request(args.url, cfg);
     return { httpStatus: res?.status, body: typeof res?.body === 'string' ? res.body.slice(0, 200000) : res?.body };
   }
 
   private xmlFor(a: any): string {
-    const lang = a.language || process.env.SAP_LANGUAGE || 'EN';
+    const lang = a.language || this.adtclient.language || 'EN';
     const resp = (a.responsible || (this.adtclient as any).username || '').toUpperCase();
     const head = `adtcore:description="${esc(a.description)}" adtcore:name="${esc(a.name)}" ` +
       `adtcore:type="${a.objtype}" adtcore:language="${lang}" adtcore:masterLanguage="${lang}" ` +

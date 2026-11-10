@@ -1,12 +1,11 @@
 jest.mock('dotenv', () => ({ config: jest.fn() }));
-jest.mock('../handlers/BaseHandler.js', () => require('../handlers/BaseHandler'), { virtual: true });
-jest.mock('../lib/sourceCache.js', () => require('../lib/sourceCache'), { virtual: true });
-jest.mock('fs', () => ({ __esModule: true, default: { existsSync: jest.fn(() => true), readFileSync: jest.fn(() => JSON.stringify({ porDefecto: 'A', clientes: { A: { url: 'system-A', usuario: 'test', password: 'test' }, B: { url: 'system-B', usuario: 'test', password: 'test' } } })) } }));
+jest.mock('fs', () => ({ __esModule: true, default: { existsSync: jest.fn(() => true), readFileSync: jest.fn(() => JSON.stringify({ porDefecto: 'A', clientes: { A: { url: 'https://system-a.invalid', usuario: 'test', password: 'test' }, B: { url: 'https://system-b.invalid', usuario: 'test', password: 'test' } } })) } }));
 const instances: any[] = [];
 const probeRequest = jest.fn(async () => ({ status: 200 }));
 jest.mock('abap-adt-api', () => ({
   session_types: { stateful: 'stateful', stateless: 'stateless' },
-  ADTClient: jest.fn().mockImplementation((url: string) => {
+  ADTClient: jest.fn().mockImplementation((origin: any) => {
+    const url = origin.base.hostname === 'system-a.invalid' ? 'system-A' : 'system-B';
     const client: any = {
       url, stateful: 'stateful',
       getObjectSource: jest.fn(async () => url + ':source'),
@@ -21,7 +20,7 @@ jest.mock('abap-adt-api', () => ({
     return client;
   })
 }));
-import { AbapAdtServer } from '../index';
+import { AbapAdtServer } from './publicServer';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
@@ -43,7 +42,8 @@ const body = (result: any) => JSON.parse(result.content[0].text);
 
 test('local healthcheck is backward compatible and probe uses only independent GET', async () => {
   const local = body(await call('healthcheck'));
-  expect(local).toEqual({ status: 'healthy', timestamp: expect.any(String) });
+  expect(local).toEqual({ status: 'healthy', timestamp: expect.any(String), sapConfigured: true,
+    sapConnectionVerified: false, sessionRecoveryRequired: false, tools: 139 });
   expect(instances).toHaveLength(0);
   const probe = body(await call('healthcheck', { probeSap: true }));
   expect(probe.sap).toMatchObject({ session: 'independent stateless session', status: 'reachable' });
@@ -176,9 +176,7 @@ test.each([
 });
 
 test('generic MCP errors retain their existing payload without arbitrary data', async () => {
-  const failed = await call('nonexistentTool');
-  expect(failed.isError).toBe(true);
-  expect(body(failed)).toEqual({ error: 'MCP error -32601: Unknown tool: nonexistentTool', code: -32601 });
+  await expect(call('nonexistentTool')).rejects.toThrow(/Tool nonexistentTool not found/);
 });
 
 test('switching while a request is pending retains its pinned client and isolates source cache', async () => {

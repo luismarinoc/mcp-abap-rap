@@ -1,10 +1,8 @@
 jest.mock('dotenv', () => ({ config: jest.fn() }));
-jest.mock('../handlers/BaseHandler.js', () => require('../handlers/BaseHandler'), { virtual: true });
-jest.mock('../lib/sourceCache.js', () => require('../lib/sourceCache'), { virtual: true });
 jest.mock('fs', () => ({ __esModule: true, default: {
   existsSync: jest.fn(() => true),
   readFileSync: jest.fn(() => JSON.stringify({ porDefecto: 'TEST', clientes: {
-    TEST: { url: 'test-system', usuario: 'test', password: 'test' }
+    TEST: { url: 'https://test-system.invalid', usuario: 'test', password: 'test' }
   } }))
 } }));
 const generator = {
@@ -14,7 +12,7 @@ jest.mock('abap-adt-api', () => ({
   session_types: { stateful: 'stateful', stateless: 'stateless' },
   ADTClient: jest.fn().mockImplementation(() => generator)
 }));
-import { AbapAdtServer } from '../index';
+import { AbapAdtServer } from './publicServer';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 

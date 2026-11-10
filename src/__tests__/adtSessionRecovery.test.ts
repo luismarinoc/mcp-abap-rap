@@ -1,14 +1,13 @@
 jest.mock('dotenv', () => ({ config: jest.fn() }));
-jest.mock('../handlers/BaseHandler.js', () => require('../handlers/BaseHandler'), { virtual: true });
-jest.mock('../lib/sourceCache.js', () => require('../lib/sourceCache'), { virtual: true });
-jest.mock('fs', () => ({ __esModule: true, default: { existsSync: jest.fn(() => true), readFileSync: jest.fn(() => JSON.stringify({ porDefecto: 'A', clientes: { A: { url: 'system-A', usuario: 'test', password: 'test' }, B: { url: 'system-B', usuario: 'test', password: 'test' } } })) } }));
+jest.mock('fs', () => ({ __esModule: true, default: { existsSync: jest.fn(() => true), readFileSync: jest.fn(() => JSON.stringify({ porDefecto: 'A', clientes: { A: { url: 'https://system-a.invalid', usuario: 'test', password: 'test' }, B: { url: 'https://system-b.invalid', usuario: 'test', password: 'test' } } })) } }));
 const clients: any[] = [];
 jest.mock('abap-adt-api', () => ({
   session_types: { stateful: 'stateful', stateless: 'stateless' },
   isCsrfError: (e: any) => e?.typeID === Symbol.for('test-csrf'),
   // Real AdtHTTP imports the package index to check whether an error is a login error.
   isLoginError: (e: any) => e?.status === 401 || e?.typeID === Symbol.for('BAD CSRF'),
-  ADTClient: jest.fn().mockImplementation((url: string) => {
+  ADTClient: jest.fn().mockImplementation((origin: any) => {
+    const url = origin.base.hostname === 'system-a.invalid' ? 'system-A' : 'system-B';
     const client: any = {
       url, stateful: 'stateful',
       getObjectSource: jest.fn(async () => url + ':source'),
@@ -24,10 +23,11 @@ jest.mock('abap-adt-api', () => ({
   })
 }));
 import { ADTClient } from 'abap-adt-api';
-import { AbapAdtServer } from '../index';
+import { AbapAdtServer } from './publicServer';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { RegistroClientes } from '../clients';
+import { Runtime } from '../server';
 
 const saved = { ...process.env };
 let server: AbapAdtServer;
@@ -87,7 +87,8 @@ test('401 read and public recognized CSRF gate ordinary operations; 403 alone do
   expect(body(await read()).diagnostic).toEqual({ category: 'recovery_required' });
   expect(body(await read()).diagnostic).toEqual({ category: 'recovery_required' });
   expect(client.getObjectSource).toHaveBeenCalledTimes(4);
-  expect(body(await call('healthcheck'))).toEqual({ status: 'healthy', timestamp: expect.any(String) });
+  expect(body(await call('healthcheck'))).toEqual({ status: 'healthy', timestamp: expect.any(String),
+    sapConfigured: true, sapConnectionVerified: false, sessionRecoveryRequired: true, tools: 139 });
 });
 
 test('pinned A failure while B active does not gate B and remains attached to A', async () => {
@@ -157,22 +158,20 @@ test('late old-session failure does not poison a successfully reauthenticated cl
   client.getObjectSource.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
   const pending = read();
   await new Promise(resolve => setImmediate(resolve));
-  let loginResult: Awaited<ReturnType<typeof call>>;
-  let oldFailure!: Awaited<ReturnType<typeof read>>;
-  try {
-    loginResult = await call('login');
-  } finally {
-    rejectOld(Object.assign(new Error('SECRET'), { err: 401 }));
-    oldFailure = await pending; // Settle the pinned read before closing the transport, even if login fails.
-  }
-  expect(body(loginResult)).toEqual({ status: 'Logged in successfully' });
-  expect(body(oldFailure).diagnostic).toEqual({ category: 'authentication', status: 401 });
+  const concurrent = await call('login');
+  expect(concurrent.isError).toBe(true);
+  expect(client.login).not.toHaveBeenCalled();
+  rejectOld(Object.assign(new Error('SECRET'), { err: 401 }));
+  const oldFailure = await pending;
+  expect(body(oldFailure).diagnostic).toEqual({ category: 'recovery_required', status: 401 });
   expect(JSON.stringify(oldFailure)).not.toContain('SECRET');
+  expect(body(await write()).diagnostic).toEqual({ category: 'recovery_required' });
+  expect(client.setObjectSource).not.toHaveBeenCalled();
+  expect(body(await call('login'))).toEqual({ status: 'Logged in successfully' });
   expect(body(await write()).updated).toBe(true);
   expect(client.setObjectSource).toHaveBeenCalledTimes(1);
   client.setObjectSource.mockRejectedValueOnce(Object.assign(new Error('SECRET'), { err: 401 }));
   expect(body(await write()).diagnostic).toEqual({ category: 'recovery_required', status: 401 });
-  expect(body(await write()).diagnostic).toEqual({ category: 'recovery_required' });
   expect(client.setObjectSource).toHaveBeenCalledTimes(2);
   expect(client.login).toHaveBeenCalledTimes(1);
 });
@@ -185,17 +184,14 @@ test('synchronous public method preserves boolean result for true and false', ()
   expect((registry.connectionActual as any).isProposalMessage).toHaveBeenCalledTimes(2);
 });
 
-test('timeout is passed as sixth public ADT option and invalid configuration fails before construction', async () => {
+test('bounded modern runtime rejects invalid timeout before constructing a client', async () => {
   await read();
-  expect(jest.mocked(ADTClient)).toHaveBeenLastCalledWith('system-A', 'test', 'test', undefined, undefined, { timeout: 60000 });
-  process.env.SAP_REQUEST_TIMEOUT_MS = '90000';
-  const registry = new RegistroClientes();
-  registry.connectionActual;
-  expect(jest.mocked(ADTClient)).toHaveBeenLastCalledWith('system-A', 'test', 'test', undefined, undefined, { timeout: 90000 });
   const constructed = jest.mocked(ADTClient).mock.calls.length;
-  for (const invalid of ['0', '-1', '1.5', 'NaN', '9007199254740992', '2147483648', '']) {
-    process.env.SAP_REQUEST_TIMEOUT_MS = invalid;
-    expect(() => new RegistroClientes()).toThrow('SAP_REQUEST_TIMEOUT_MS');
+  for (const invalid of ['0', '-1', '1.5', 'NaN', '9007199254740992', '2147483648', '', '99', '120001']) {
+    expect(() => new Runtime({ ...process.env, SAP_REQUEST_TIMEOUT_MS: invalid })).toThrow('SAP_REQUEST_TIMEOUT_MS');
     expect(jest.mocked(ADTClient).mock.calls).toHaveLength(constructed);
   }
+  const modern = new Runtime({ ...process.env, SAP_REQUEST_TIMEOUT_MS: '90000' });
+  await modern.close();
+  expect(jest.mocked(ADTClient).mock.calls).toHaveLength(constructed);
 });
