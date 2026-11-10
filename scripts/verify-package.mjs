@@ -7,7 +7,9 @@ const npm = process.env.npm_execpath;
 if (!npm) throw new Error("Run through npm run verify:package");
 const root = process.cwd();
 // This test owns and removes every install/cache artifact inside the registered worktree.
-const dir = await mkdtemp(path.join(root, ".local-builds", "package-verification-"));
+const scratchRoot = path.join(root, ".local-builds");
+await mkdir(scratchRoot, { recursive: true });
+const dir = await mkdtemp(path.join(scratchRoot, "package-verification-"));
 const installDir = path.join(dir, "install");
 const env = {
   ...Object.fromEntries(Object.entries(process.env).filter(([key]) =>
